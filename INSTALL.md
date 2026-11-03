@@ -1,0 +1,142 @@
+# Installing Claude for Safari
+
+There are two ways to install. Both need the **bridge** (step 2), because that is what connects Safari to Claude.
+
+- **Option A – download the prebuilt apps** (no Xcode). Quickest. Safari will treat them as unsigned, so you must turn on *Allow unsigned extensions*.
+- **Option B – build from source** (needs Xcode, free). Your own Mac signs the apps, so Safari accepts them normally.
+
+You do **not** need a paid Apple Developer account for either option.
+
+---
+
+## 1. Requirements (both options)
+
+Open **Terminal** and run these one at a time.
+
+**Homebrew** (skip if `brew -v` already works):
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+After it finishes, run the two `echo ... >> ~/.zprofile` / `eval` lines it prints, then open a new Terminal window.
+
+**Node.js 20+ and Zellij:**
+```bash
+brew install node zellij
+```
+Zellij is optional. It is only used by terminal mode to open a Claude Code session automatically when you share a tab.
+
+**Claude Code**, then log in with your Claude account (Pro or Max):
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+claude
+```
+Inside Claude Code type `/login`, finish the login in the browser, then quit with `/exit`.
+
+**Get this repo:**
+```bash
+cd ~
+git clone https://github.com/armaan-hub/Safari-calude-extension.git claude-web-extension
+cd ~/claude-web-extension
+```
+(No git? `xcode-select --install` installs it, or download the ZIP from GitHub and unzip it to `~/claude-web-extension`.)
+
+## 2. Install the bridge (both options)
+
+```bash
+cd ~/claude-web-extension
+./bridge/install.sh
+```
+
+This:
+- starts the bridge on `127.0.0.1:8787` and makes it start at every login,
+- registers the `safari` MCP server with Claude Code.
+
+It should end with `Bridge answered: {"ok":true,...}`.
+
+Keep the folder where it is: the bridge runs from it. If you move the folder, run `./bridge/install.sh` again.
+
+---
+
+## 3A. Option A – prebuilt apps (no Xcode)
+
+1. Download `Claude-for-Safari-apps.zip` from the [Releases page](https://github.com/armaan-hub/Safari-calude-extension/releases).
+2. Unzip it and drag **Claude for Safari.app** and/or **Claude Panel for Safari.app** into **Applications**.
+3. Remove the download quarantine:
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/Claude for Safari.app" "/Applications/Claude Panel for Safari.app"
+   ```
+4. Open each app once (double-click). A small window appears; you can close it.
+5. In Safari: **Settings → Advanced** → tick **Show features for web developers**.
+6. **Settings → Developer** → tick **Allow unsigned extensions** (enter your Mac password). On some Safari versions this is in the **Develop** menu, and Safari may switch it off after quitting; if the extension disappears, turn it on again.
+7. Continue with [step 4](#4-turn-the-extensions-on-in-safari).
+
+## 3B. Option B – build from source (Xcode)
+
+1. Install **Xcode** from the App Store and open it once (accept the license, let it install components).
+2. Create a free signing certificate: **Xcode → Settings → Accounts → +** → add your Apple ID → select your team → **Manage Certificates… → + → Apple Development**.
+3. Build and install both apps:
+   ```bash
+   cd ~/claude-web-extension
+   ./build-safari.sh
+   ```
+   - The signing team is detected from your Apple Development certificate. To choose one: `TEAM_ID=XXXXXXXXXX ./build-safari.sh`
+   - If Xcode says the bundle identifier is not available, use your own prefix: `BUNDLE_PREFIX=com.yourname ./build-safari.sh`
+   - Only one app: `./build-safari.sh --variant terminal` or `--variant panel`
+
+   The script builds, signs, copies the apps to `/Applications`, and registers them with Safari.
+
+## 4. Turn the extensions on in Safari
+
+1. Quit Safari (**⌘Q**) and open it again.
+2. **Safari → Settings → Extensions** → tick **Claude Code for Safari** and/or **Claude Panel for Safari**.
+3. Select each one → **Edit Websites…** (or the website access setting) → **Always Allow on Every Website**. Claude can only work on sites it is allowed on.
+4. Optional: right-click the toolbar → **Customize Toolbar** to place the icons.
+
+---
+
+## 5. Using it
+
+### Terminal mode (Claude for Safari, dark icon)
+
+1. Open the page you want help with and click the dark Claude icon (or press **Option+Shift+C**). The icon shows **ON**: this tab is shared.
+2. A Terminal window opens with the Zellij session `claude-safari` running Claude Code. Later clicks reattach to the same session.
+   - Attach by hand from any terminal: `zellij attach claude-safari`
+   - Without Zellij, just run `claude` in any terminal.
+   - Turn the auto-open off: `touch ~/.claude-safari-bridge/auto-session-off` (delete the file to turn it back on).
+3. Ask Claude Code, e.g. *"Read my Safari tab and summarise it"* or *"Draft a LinkedIn post in the composer on my shared tab"*.
+4. Click the icon again to unshare the tab.
+
+The auto-opened session runs `claude --dangerously-skip-permissions`, which only skips Claude Code's own file/command prompts. Risky Safari clicks still ask **you**.
+
+### Panel mode (Claude Panel for Safari, cream icon)
+
+1. Click the cream icon (or **Option+C**) to open the panel on the page.
+2. Gear icon (⚙) → choose:
+   - **Claude subscription** – uses your Claude Code login through the bridge (the dot should be green), or
+   - **API key** – paste a key from [console.anthropic.com](https://console.anthropic.com) (billed per use).
+3. Type your request and press Enter (Shift+Enter for a new line).
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Extension missing in Safari Settings | Open the app from `/Applications` once, quit and reopen Safari. Option A: check *Allow unsigned extensions* is on. |
+| Bridge not reachable / panel dot red | `curl http://127.0.0.1:8787/health`. If nothing answers, run `./bridge/install.sh` again and read `~/Library/Logs/claude-safari-bridge.log`. |
+| Claude Code has no `safari` tools | `claude mcp list` should show `safari`. If not: `claude mcp add --scope user safari -- node ~/claude-web-extension/bridge/safari-mcp.mjs`, then restart Claude Code. |
+| "Tab not shared" | Click the dark icon on that tab so it shows **ON**. |
+| No Terminal opens on share | `brew install zellij`; check `~/.claude-safari-bridge/auto-session-off` does not exist; see the bridge log. |
+| `build-safari.sh`: no signing team | Create the Apple Development certificate (step 3B.2) or pass `TEAM_ID=...`. |
+| `build-safari.sh`: bundle id taken | `BUNDLE_PREFIX=com.yourname ./build-safari.sh` |
+
+## Uninstall
+
+```bash
+cd ~/claude-web-extension
+./bridge/uninstall.sh
+claude mcp remove --scope user safari
+rm -rf "/Applications/Claude for Safari.app" "/Applications/Claude Panel for Safari.app"
+rm -rf ~/.claude-safari-bridge          # optional: chats and memory
+zellij delete-session claude-safari --force 2>/dev/null
+```

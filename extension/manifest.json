@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Claude Code for Safari",
+  "version": "0.1.0",
+  "description": "Let Claude read and operate the page you are on, using your own logged-in Safari session.",
+  "permissions": ["storage", "tabs", "activeTab", "scripting", "alarms"],
+  "host_permissions": ["<all_urls>", "http://127.0.0.1:8787/*"],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "48": "icons/terminal/icon-48.png",
+    "96": "icons/terminal/icon-96.png",
+    "128": "icons/terminal/icon-128.png",
+    "256": "icons/terminal/icon-256.png",
+    "512": "icons/terminal/icon-512.png"
+  },
+  "action": {
+    "default_title": "Claude Code",
+    "default_icon": {
+      "48": "icons/terminal/icon-48.png",
+      "96": "icons/terminal/icon-96.png",
+      "128": "icons/terminal/icon-128.png",
+      "256": "icons/terminal/icon-256.png",
+      "512": "icons/terminal/icon-512.png"
+    }
+  },
+  "commands": {
+    "toggle-claude": {
+      "suggested_key": { "default": "Alt+Shift+C" },
+      "description": "Share or unshare this tab with Claude Code"
+    }
+  }
+}
