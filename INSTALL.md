@@ -1,5 +1,33 @@
 # Installing Claude for Safari
 
+## Quick install (one command)
+
+Open **Terminal** and paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/armaan-hub/Safari-calude-extension/main/setup.sh | bash
+```
+
+This does steps 1–3 below for you (it may ask for your Mac password while installing Homebrew). Then do only:
+
+1. Log in to Claude Code: run `claude`, type `/login`, then `/exit`.
+2. [Step 4](#4-turn-the-extensions-on-in-safari): turn the extensions on in Safari. If the script says it used the **prebuilt** apps, also turn on *Allow unsigned extensions* (Option A, steps 5–6).
+
+Options (add after `bash -s --`):
+
+| Option | Meaning |
+|---|---|
+| `--prebuilt` | Download the released apps (no Xcode). |
+| `--build` | Build signed apps from source (needs Xcode + Apple Development certificate). |
+| `--variant terminal` / `--variant panel` | Install only one of the two apps. |
+| `--dir PATH` | Keep the source somewhere other than `~/claude-web-extension`. |
+
+Example: `curl -fsSL https://raw.githubusercontent.com/armaan-hub/Safari-calude-extension/main/setup.sh | bash -s -- --prebuilt`
+
+Run the same command again any time to update.
+
+The rest of this page is the manual install.
+
 There are two ways to install. Both need the **bridge** (step 2), because that is what connects Safari to Claude.
 
 - **Option A – download the prebuilt apps** (no Xcode). Quickest. Safari will treat them as unsigned, so you must turn on *Allow unsigned extensions*.

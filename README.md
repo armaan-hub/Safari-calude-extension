@@ -12,7 +12,19 @@ The repo builds **two separate Safari extensions** from one source folder. Insta
 | Shortcut | **Option+Shift+C** shares/unshares the tab | **Option+C** shows/hides the panel |
 | Uses | Your Claude Pro/Max login (via Claude Code) | Your Claude login (via the local bridge) **or** an Anthropic API key |
 
-Install instructions: **[INSTALL.md](INSTALL.md)**.
+## Quick install (one command)
+
+Paste this into **Terminal** on your Mac:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/armaan-hub/Safari-calude-extension/main/setup.sh | bash
+```
+
+It installs everything needed (Homebrew, Node, Zellij, git, Claude Code), downloads this repo to `~/claude-web-extension`, starts the local bridge, and installs both Safari apps. If Xcode and an Apple Development certificate are present it builds signed apps; otherwise it installs the prebuilt release. Safe to run again to update.
+
+Options: `--prebuilt`, `--build`, `--variant terminal|panel`, `--dir PATH` (pass them as `| bash -s -- --prebuilt`).
+
+Afterwards: log in to Claude Code (`claude`, then `/login`) and enable the extensions in Safari. Step-by-step and manual install: **[INSTALL.md](INSTALL.md)**.
 
 ## How it works
 
