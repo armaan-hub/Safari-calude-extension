@@ -193,7 +193,7 @@ function buildAllCombos(profile) {
 }
 
 // Start address: keywords, country, Past 3 hours (f_TPR) and Most recent sort (sortBy=DD). The city and the applicants filter are set by clicking.
-function buildSearchUrl(keywords, countryWord) {
+export function buildSearchUrl(keywords, countryWord) {
   return `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(keywords)}&location=${encodeURIComponent(countryWord)}&f_TPR=${POSTED_WINDOW_PARAM}&sortBy=DD`;
 }
 
@@ -247,7 +247,7 @@ export function buildDiscoverPrompt({ combos, tabId, maxJobPages, skills }) {
   const system = [
     'You are the Job Watcher discovery agent. Use only the Safari tools you are given. No other tool.',
     `Work only in Safari tab ${tabId}. If safari_status shows tab ${tabId} is not shared, stop and answer with status "not_shared".`,
-    'LinkedIn job filters that are NOT in the search_url (the city location and Under 10 applicants) are clicked one at a time: click one, wait, re-read the page, then the next. The date filter and sort are already in the search_url; never open the Date posted popover. Never edit the URL yourself, only navigate to the exact search_url given.',
+    'LinkedIn job filters that are NOT in the search_url (the city location and Under 10 applicants) are clicked one at a time: click one, wait, re-read the page, then the next. The date filter and sort are already in the search_url; never open the Date posted popover. Never turn on LinkedIn\'s Easy Apply filter: do not add f_AL to a search URL and do not click the Easy Apply filter pill. It hides jobs that apply on the company site. Only the Easy Apply or Apply button on a single job is ever clicked, and only to open the form. Never edit the URL yourself, only navigate to the exact search_url given.',
     'Wait 2-5 s between clicks.',
     'START each search by calling navigate with that exact URL (the search_url given in the user message). Never type into LinkedIn\'s global search box, never type into the Jobs page "Describe the job you want" (AI) box, and never press Enter to search. The keyword search is already loaded by the URL.',
     'The search_url carries the keywords, the country, Past 3 hours (f_TPR) and Most recent sort. LinkedIn may keep the account\'s remembered city, so the city is set by clicking (step 2) and the Under 10 applicants pill by clicking (step 4); the date filter is never clicked.',

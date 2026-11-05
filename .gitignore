@@ -18,3 +18,6 @@ run.lock
 *.corrupt-*
 .claude-safari-bridge/
 profile.md
+
+# Chromium build output (build-chromium.sh)
+dist/

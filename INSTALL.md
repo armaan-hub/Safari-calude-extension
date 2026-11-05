@@ -173,3 +173,32 @@ rm -rf "/Applications/Claude for Safari.app" "/Applications/Claude Panel for Saf
 rm -rf ~/.claude-safari-bridge          # optional: chats and memory
 zellij delete-session claude-safari --force 2>/dev/null
 ```
+
+## Chrome and Brave
+
+The same extension also runs in Google Chrome and Brave. The Chromium build is a copy of `extension/` with a
+Chrome-style manifest (a service worker instead of the Safari background page).
+
+**Build** (no Xcode, works offline):
+
+```bash
+cd ~/claude-web-extension
+./build-chromium.sh          # writes dist/chromium
+./build-chromium.sh --zip    # also writes dist/claude-code-chromium.zip
+```
+
+**Load it:**
+
+1. Open `chrome://extensions` (Brave: `brave://extensions`) and turn on **Developer mode**.
+2. Click **Load unpacked** and pick `~/claude-web-extension/dist/chromium`.
+3. Click the toolbar icon, or press **Alt+Shift+C** on a tab, to share that tab with Claude.
+
+**Notes:**
+
+- It uses the same bridge on `127.0.0.1:8787` (start it as in section 2) and the same Claude Code MCP tools. The tool
+  names still start with `safari_`.
+- Only one browser extension (Safari or Chrome/Brave) should share tabs at a time. The bridge serves a single
+  extension poller.
+- The allowed-sites list and the approval rules are identical in both builds.
+- A Chrome service worker sleeps after a few idle minutes. The extension wakes it with its alarm, and its state is kept
+  in extension storage, so sharing resumes on its own.
