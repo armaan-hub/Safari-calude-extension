@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { bridgeHomePath } from './paths.mjs';
 
 export const DEFAULT_CONFIG = {
   model_discover: 'haiku',
@@ -44,7 +45,7 @@ function isObj(v) {
 // Returns the job-watcher state directory, creating it with mode 0700.
 export function stateDir() {
   const dir =
-    process.env.JOBWATCH_DIR || path.join(os.homedir(), '.claude-safari-bridge', 'jobwatch');
+    process.env.JOBWATCH_DIR || bridgeHomePath('jobwatch');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.chmodSync(dir, 0o700);
   return dir;

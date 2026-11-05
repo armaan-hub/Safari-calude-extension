@@ -32,9 +32,13 @@ test('chromium manifest is MV3 with a service worker and no Safari background li
 test('chromium manifest keeps permissions, host access, content scripts, action and commands', () => {
   const m = readJson(path.join(dist, 'manifest.json'));
   const orig = readJson(path.join(ext, 'manifest.json'));
-  assert.ok(m.host_permissions.includes('http://127.0.0.1:8787/*'));
+  assert.ok(m.host_permissions.includes('http://127.0.0.1:8788/*'));
+  assert.ok(!m.host_permissions.some((h) => h.includes('8787')));
   assert.deepEqual(m.permissions, orig.permissions);
-  assert.deepEqual(m.host_permissions, orig.host_permissions);
+  assert.deepEqual(
+    m.host_permissions,
+    orig.host_permissions.map((h) => h.replace('8787', '8788')),
+  );
   assert.deepEqual(m.content_scripts, orig.content_scripts);
   assert.deepEqual(m.action, orig.action);
   assert.ok('toggle-claude' in m.commands);
@@ -56,4 +60,26 @@ test('the Safari manifest in extension/ is unchanged', () => {
   const m = readJson(path.join(ext, 'manifest.json'));
   assert.equal(m.name, 'Claude Code for Safari');
   assert.deepEqual(m.background, { scripts: ['term-sites.js', 'background.js'], persistent: false });
+  assert.ok(m.host_permissions.includes('http://127.0.0.1:8787/*'));
+});
+
+test('staged background.js points at port 8788 and the original extension/background.js still says 8787', () => {
+  const staged = fs.readFileSync(path.join(dist, 'background.js'), 'utf8');
+  assert.ok(staged.includes('const BRIDGE_BASE = "http://127.0.0.1:8788";'));
+  assert.ok(!staged.includes('8787'));
+  const orig = fs.readFileSync(path.join(ext, 'background.js'), 'utf8');
+  assert.ok(orig.includes('const BRIDGE_BASE = "http://127.0.0.1:8787";'));
+});
+
+test('dist/chromium contains no 8787 anywhere', () => {
+  const hits = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (fs.readFileSync(p).includes('8787')) hits.push(p);
+    }
+  };
+  walk(dist);
+  assert.deepEqual(hits, []);
 });

@@ -176,29 +176,53 @@ zellij delete-session claude-safari --force 2>/dev/null
 
 ## Chrome and Brave
 
-The same extension also runs in Google Chrome and Brave. The Chromium build is a copy of `extension/` with a
-Chrome-style manifest (a service worker instead of the Safari background page).
+The extension also runs in Google Chrome and Brave. Chromium is a **separate install** from Safari. It has its own
+bridge process on `127.0.0.1:8788`, its own state folder, its own LaunchAgent, its own Zellij session and its own
+Claude Code MCP servers. Safari and Chromium can run at the same time without sharing tabs, approvals, tokens or state.
 
-**Build** (no Xcode, works offline):
+**(a) Build** (no Xcode, works offline):
 
 ```bash
 cd ~/claude-web-extension
-./build-chromium.sh          # writes dist/chromium
+./build-chromium.sh          # writes dist/chromium (already pointed at port 8788)
 ./build-chromium.sh --zip    # also writes dist/claude-code-chromium.zip
 ```
 
-**Load it:**
+**(b) Install the Chrome / Brave bridge** (LaunchAgent `com.armaan.claude-chromium-bridge`):
+
+```bash
+cd ~/claude-web-extension
+./bridge/install-chromium.sh     # state folder ~/.claude-chromium-bridge (mode 700), log ~/Library/Logs/claude-chromium-bridge.log
+./bridge/uninstall-chromium.sh   # stops it and removes the LaunchAgent (keeps the state folder)
+```
+
+**(c) Load the extension:**
 
 1. Open `chrome://extensions` (Brave: `brave://extensions`) and turn on **Developer mode**.
 2. Click **Load unpacked** and pick `~/claude-web-extension/dist/chromium`.
 3. Click the toolbar icon, or press **Alt+Shift+C** on a tab, to share that tab with Claude.
 
+**(d) Register the Chromium MCP servers with Claude Code** (once; separate from the Safari servers `safari` and `assistant`):
+
+```bash
+claude mcp add --scope user chromium -e SAFARI_BRIDGE_PORT=8788 -e CLAUDE_BRIDGE_HOME=$HOME/.claude-chromium-bridge -- node ~/claude-web-extension/bridge/safari-mcp.mjs
+claude mcp add --scope user chromium-assistant -e SAFARI_BRIDGE_PORT=8788 -e CLAUDE_BRIDGE_HOME=$HOME/.claude-chromium-bridge -- node ~/claude-web-extension/bridge/assistant-mcp.mjs
+claude mcp list      # should show chromium and chromium-assistant
+```
+
 **Notes:**
 
-- It uses the same bridge on `127.0.0.1:8787` (start it as in section 2) and the same Claude Code MCP tools. The tool
-  names still start with `safari_`.
-- Only one browser extension (Safari or Chrome/Brave) should share tabs at a time. The bridge serves a single
-  extension poller.
-- The allowed-sites list and the approval rules are identical in both builds.
+- The MCP tool names inside still start with `safari_` (for example `safari_read_page`), but Claude Code shows them as
+  `mcp__chromium__safari_*`. Use the `chromium` server for Chrome and Brave tabs and `safari` for Safari tabs.
+- The Chromium state folder `~/.claude-chromium-bridge` starts empty: no allowed sites, no profile, no resume, no
+  queue. Set the allowed sites in the extension as usual.
+- To reuse your Safari job details (profile and resume) in Chromium, symlink them instead of copying:
+  `ln -s ~/.claude-safari-bridge/profile.md ~/.claude-chromium-bridge/profile.md` and
+  `ln -s ~/.claude-safari-bridge/resume ~/.claude-chromium-bridge/resume`. Both bridges then read the same files.
+- The auto-allow switch for Chromium is the file `~/.claude-chromium-bridge/auto-allow-apply` (create it to turn
+  auto-allow on; delete it to turn it off). The Safari switch is `~/.claude-safari-bridge/auto-allow-apply`.
+- The Chromium Zellij session is `claude-chromium` (set by `CLAUDE_ZELLIJ_SESSION`). Attach by hand with
+  `zellij attach claude-chromium`.
+- The allowed-sites list and the approval rules are identical in both builds, but each build keeps its own copy.
 - A Chrome service worker sleeps after a few idle minutes. The extension wakes it with its alarm, and its state is kept
   in extension storage, so sharing resumes on its own.

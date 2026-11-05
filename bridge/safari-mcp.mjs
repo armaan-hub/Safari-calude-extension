@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Claude for Safari — MCP server for Claude Code (PLAN T13a).
-// Newline-delimited JSON-RPC 2.0 on stdio. Tool calls go to the local bridge (127.0.0.1:8787),
+// Newline-delimited JSON-RPC 2.0 on stdio. Tool calls go to the local bridge (127.0.0.1, SAFARI_BRIDGE_PORT, default 8787),
 // which queues them for the Safari extension. Built-ins only.
 // stdout carries JSON-RPC and nothing else; logs go to stderr.
 
@@ -11,12 +11,13 @@ import readline from "node:readline";
 import { describeToolCall } from "./jobwatch-activity.mjs";
 import { loadSites, urlAllowed } from "./sites.mjs";
 import { appendActivity, stateDir } from "./jobwatch-state.mjs";
+import { bridgeHomePath } from './paths.mjs';
 
 const BRIDGE_PORT = Number(process.env.SAFARI_BRIDGE_PORT) || 8787;
 const BRIDGE = `http://127.0.0.1:${BRIDGE_PORT}`;
-const TOKEN_FILE = path.join(os.homedir(), ".claude-safari-bridge", "mcp-token");
+const TOKEN_FILE = bridgeHomePath("mcp-token");
 // Switch file set by the user: while it exists, the one click that opens a LinkedIn Easy Apply form is allowed without asking.
-const AUTO_ALLOW_FILE = path.join(os.homedir(), ".claude-safari-bridge", "auto-allow-apply");
+const AUTO_ALLOW_FILE = bridgeHomePath("auto-allow-apply");
 const AUTO_ALLOW_LABEL = /^click\s+[\u201C"']?easy apply(?: to this job)?[\u201D"']?\s*$/i;
 const AUTO_ALLOW_MAX = 10;
 const AUTO_ALLOW_WINDOW_MS = 60 * 60_000;

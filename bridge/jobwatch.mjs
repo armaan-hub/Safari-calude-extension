@@ -46,6 +46,7 @@ import {
   writeJson,
   writeReady,
 } from './jobwatch-state.mjs';
+import { bridgeHomePath } from './paths.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAFARI_MCP = path.join(HERE, 'safari-mcp.mjs');
@@ -74,7 +75,7 @@ function bridgePort() {
 // Token is read from HOME and never printed or logged.
 function readToken() {
   try {
-    const token = fs.readFileSync(path.join(os.homedir(), '.claude-safari-bridge', 'mcp-token'), 'utf8').trim();
+    const token = fs.readFileSync(bridgeHomePath('mcp-token'), 'utf8').trim();
     return token || null;
   } catch {
     return null;
@@ -367,6 +368,7 @@ async function cycle(dir, now, force, skipInterval = false) {
           SAFARI_BRIDGE_PORT: String(port),
           SAFARI_MCP_SOURCE: 'watcher',
           ...(process.env.JOBWATCH_DIR ? { JOBWATCH_DIR: process.env.JOBWATCH_DIR } : {}),
+          ...(process.env.CLAUDE_BRIDGE_HOME ? { CLAUDE_BRIDGE_HOME: process.env.CLAUDE_BRIDGE_HOME } : {}),
           HOME: os.homedir(),
         },
       },

@@ -39,6 +39,43 @@ node -e "$JS" "$OUT/manifest.json"
 # Chrome MV3 service workers load classic scripts with importScripts, not a background "scripts" list.
 printf '%s\n' 'importScripts("term-sites.js", "background.js");' > "$OUT/sw.js"
 
+# Point the Chromium copy at its own bridge (port 8788), so Safari (8787) and Chromium never share a bridge.
+# Node edits of the staged files only; extension/ is never changed.
+PORT_JS='
+const fs = require("fs");
+const path = require("path");
+const dir = process.argv[1];
+const OLD_BASE = "const BRIDGE_BASE = \"http://127.0.0.1:8787\";";
+const NEW_BASE = "const BRIDGE_BASE = \"http://127.0.0.1:8788\";";
+const bgFile = path.join(dir, "background.js");
+const bg = fs.readFileSync(bgFile, "utf8");
+if (!bg.includes(OLD_BASE)) {
+  console.error("build-chromium: exact BRIDGE_BASE line (port 8787) not found in background.js");
+  process.exit(1);
+}
+fs.writeFileSync(bgFile, bg.replace(OLD_BASE, NEW_BASE));
+const mFile = path.join(dir, "manifest.json");
+const m = JSON.parse(fs.readFileSync(mFile, "utf8"));
+const hp = Array.isArray(m.host_permissions) ? m.host_permissions : [];
+const i = hp.indexOf("http://127.0.0.1:8787/*");
+if (i < 0) {
+  console.error("build-chromium: http://127.0.0.1:8787/* not found in host_permissions");
+  process.exit(1);
+}
+hp[i] = "http://127.0.0.1:8788/*";
+m.host_permissions = hp;
+fs.writeFileSync(mFile, JSON.stringify(m, null, 2) + "\n");
+'
+node -e "$PORT_JS" "$OUT"
+
+# Fail the build if any Safari port is left anywhere in the Chromium copy (content.js, term-sites.js and panel files included).
+if grep -rl "8787" "$OUT" >/dev/null 2>&1; then
+  echo "build-chromium: port 8787 still present in $OUT:" >&2
+  grep -rn "8787" "$OUT" >&2
+  exit 1
+fi
+echo "Port check: no 8787 in dist/chromium (content.js, term-sites.js and panel files clean); bridge port is 8788."
+
 if [ "$want_zip" -eq 1 ]; then
   rm -f "$ZIP_OUT"
   (cd "$ROOT/dist" && zip -qr "$ZIP_OUT" chromium)

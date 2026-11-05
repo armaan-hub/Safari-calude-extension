@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { bridgeHomePath } from './paths.mjs';
 
 export const VERDICTS = new Set(['strong', 'stretch', 'no']);
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
@@ -18,7 +19,7 @@ const PHONE_RUN_RE = /\+?(?:\(\d+\)|\d+)(?:[\s.\-]{1,2}(?:\(\d+\)|\d+))+/g;
 export function fitLogFile() {
   const fromEnv = process.env.FIT_LOG_FILE;
   if (fromEnv) return fromEnv;
-  return path.join(os.homedir(), '.claude-safari-bridge', 'jobwatch', 'fit-log.json');
+  return bridgeHomePath('jobwatch', 'fit-log.json');
 }
 
 // Hex sha256 of the given texts joined with newlines. Used to tie a fit to the rules that produced it.

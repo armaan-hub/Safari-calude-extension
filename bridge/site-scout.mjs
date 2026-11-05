@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { looksPersonal } from './fit-store.mjs';
 import { normaliseHost, hostAllowed, hasTwoLabels, isBlockedHost } from './sites.mjs';
+import { bridgeHomePath } from './paths.mjs';
 
 const NOTE_MAX = 300;
 const QUALITY_MIN = 1;
@@ -17,7 +18,7 @@ const QUALITY_MAX = 5;
 export function scoutFile() {
   const fromEnv = process.env.SITE_SCOUT_FILE;
   if (fromEnv) return fromEnv;
-  return path.join(os.homedir(), '.claude-safari-bridge', 'site-scout.json');
+  return bridgeHomePath('site-scout.json');
 }
 
 function emptyState() {

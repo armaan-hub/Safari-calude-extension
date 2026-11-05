@@ -6,13 +6,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { bridgeHomePath } from './paths.mjs';
 
 export const DEFAULT_SITES = ['linkedin.com'];
 
 const BLOCKED_HOST = /bank|paypal|stripe|wallet|payment|checkout|creditcard|billing/i;
 
 export function sitesFile() {
-  return process.env.SAFARI_SITES_FILE || path.join(os.homedir(), '.claude-safari-bridge', 'allowed-sites.json');
+  return process.env.SAFARI_SITES_FILE || bridgeHomePath('allowed-sites.json');
 }
 
 // Accepts "https://Example.com/path", "example.com", "Example.com." and returns the lower-case hostname.

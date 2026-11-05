@@ -28,12 +28,13 @@ import {
   stateDir,
   writeReady,
 } from "./jobwatch-state.mjs";
+import { bridgeHomePath } from './paths.mjs';
 
 const DEFAULT_PROTOCOL = "2025-06-18";
 const SERVER_INFO = { name: "assistant", version: "0.1.0" };
 const WATCHER = process.env.SAFARI_MCP_SOURCE === "watcher";
 const PROFILE_FILE =
-  process.env.ASSISTANT_PROFILE_FILE || path.join(os.homedir(), ".claude-safari-bridge", "profile.md");
+  process.env.ASSISTANT_PROFILE_FILE || bridgeHomePath("profile.md");
 const NO_PROFILE = "No profile.md yet. Ask the user to run: node bridge/jobwatch.mjs profile-md";
 const READY_STATUSES = new Set(["discovered", "prepare"]);
 const ACTIVITY_LINES_DEFAULT = 40;

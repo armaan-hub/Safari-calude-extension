@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { stateDir } from './jobwatch-state.mjs';
+import { bridgeHomePath } from './paths.mjs';
 
 const NOTES_START = '<!-- notes:start -->';
 const NOTES_END = '<!-- notes:end -->';
@@ -127,7 +128,7 @@ export function writeProfileMd({ profileFile, outFile } = {}) {
   const dest =
     outFile ||
     process.env.ASSISTANT_PROFILE_FILE ||
-    path.join(os.homedir(), '.claude-safari-bridge', 'profile.md');
+    bridgeHomePath('profile.md');
 
   const raw = readOptional(src);
   if (raw === null) throw new Error(`profile.json not found: ${src}`);

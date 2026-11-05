@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { bridgeHomePath } from './paths.mjs';
 
 const MASTER_ORDER = ['txt', 'md', 'docx', 'pdf'];
 const PDF_MIN_CHARS = 50;
@@ -20,7 +21,7 @@ const FORBIDDEN_TAG_RE = /<(table|img|header|footer|div|span)\b/i;
 export function resumeDir() {
   const fromEnv = process.env.RESUME_DIR;
   if (fromEnv) return fromEnv;
-  return path.join(os.homedir(), '.claude-safari-bridge', 'resume');
+  return bridgeHomePath('resume');
 }
 
 // Lower-case, every run of non-letter/non-digit characters becomes one space, trimmed.

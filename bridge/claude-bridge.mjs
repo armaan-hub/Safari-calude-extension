@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Claude for Safari — local bridge.
-// Listens on 127.0.0.1:8787 and speaks just enough of the Anthropic Messages API
+// Listens on 127.0.0.1 at PORT (default 8787) and speaks just enough of the Anthropic Messages API
 // for the extension. Each request is answered by the user's own Claude Code CLI
 // (`claude -p`), which uses the Claude Pro login. No API key is needed.
 // Built-ins only: http, child_process, crypto, fs, os, path.
@@ -12,15 +12,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadSites } from "./sites.mjs";
+import { bridgeHomePath } from './paths.mjs';
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PORT) || 8787;
 const BODY_CAP = 25 * 1024 * 1024;
 const TIMEOUT_MS = 180_000;
 const ORIGIN_RE = /^(safari-web-extension|chrome-extension|moz-extension):\/\//;
-const WORK_DIR = path.join(os.tmpdir(), "claude-safari-bridge-work");
+// Work folder for the claude subprocess. Default unchanged; a second instance (CLAUDE_BRIDGE_HOME set, e.g. Chromium)
+// gets its own folder keyed by its resolved state folder, so the two bridges never share a work dir.
+const WORK_DIR = (process.env.CLAUDE_BRIDGE_HOME || "").trim()
+  ? path.join(os.tmpdir(), "claude-bridge-work-" + createHash("sha256").update(path.resolve(bridgeHomePath())).digest("hex").slice(0, 8))
+  : path.join(os.tmpdir(), "claude-safari-bridge-work");
 // Local data: chat history and long-term memory (plain files, owner-only).
-const DATA_DIR = path.join(os.homedir(), ".claude-safari-bridge");
+const DATA_DIR = bridgeHomePath();
 const CHATS_DIR = path.join(DATA_DIR, "chats");
 const MEMORY_FILE = path.join(DATA_DIR, "memory.md");
 const CHAT_ID_RE = /^[a-z0-9-]{8,64}$/;
@@ -1099,9 +1104,13 @@ async function extHello(req, res, cors) {
 }
 
 // ---------- terminal mode: auto Zellij session when a tab is shared (PLAN T19) ----------
-// One fixed Zellij session ("claude-safari") running `claude --dangerously-skip-permissions` in the home folder.
+// One fixed Zellij session running `claude --dangerously-skip-permissions` in the home folder.
+// Name from CLAUDE_ZELLIJ_SESSION (letters, digits, _ and -); default "claude-safari" (Safari unchanged).
 // Opened in Terminal.app the first time a tab is shared; later shares reattach or do nothing.
-const SESSION_NAME = "claude-safari";
+const SESSION_NAME = (() => {
+  const v = (process.env.CLAUDE_ZELLIJ_SESSION || "").trim();
+  return /^[A-Za-z0-9_-]{1,64}$/.test(v) ? v : "claude-safari";
+})();
 const SESSION_CMD = path.join(DATA_DIR, "open-session.command");
 const SESSION_KDL = path.join(DATA_DIR, "claude-safari.kdl");
 const SESSION_OFF = path.join(DATA_DIR, "auto-session-off"); // create this file to turn the feature off
@@ -1207,7 +1216,8 @@ function writeSessionFiles() {
     const safariMcpScript = path.join(decodeURIComponent(new URL(".", import.meta.url).pathname), "safari-mcp.mjs");
     // Terminal session only: the assistant tools (profile, ready list, recent activity, notify) sit beside the safari tools.
     const assistantMcpScript = path.join(decodeURIComponent(new URL(".", import.meta.url).pathname), "assistant-mcp.mjs");
-    const safariMcpJson = JSON.stringify({ mcpServers: { safari: { command: process.execPath, args: [safariMcpScript] }, assistant: { command: process.execPath, args: [assistantMcpScript] } } }, null, 2) + "\n";
+    const mcpEnv = { SAFARI_BRIDGE_PORT: String(PORT), ...(process.env.CLAUDE_BRIDGE_HOME ? { CLAUDE_BRIDGE_HOME: process.env.CLAUDE_BRIDGE_HOME } : {}) };
+    const safariMcpJson = JSON.stringify({ mcpServers: { safari: { command: process.execPath, args: [safariMcpScript], env: mcpEnv }, assistant: { command: process.execPath, args: [assistantMcpScript], env: mcpEnv } } }, null, 2) + "\n";
     fs.writeFileSync(safariMcpFile, safariMcpJson, { mode: 0o600 });
     fs.chmodSync(safariMcpFile, 0o600);
     const zellij = JSON.stringify(findZellij() || "zellij");
@@ -1222,11 +1232,11 @@ function writeSessionFiles() {
     const script = `#!/bin/zsh -l
 cd "$HOME"
 Z=${zellij}
-if "$Z" list-sessions -n 2>/dev/null | grep -E '^claude-safari( |$)' | grep -vq EXITED; then
-  exec "$Z" attach claude-safari
+if "$Z" list-sessions -n 2>/dev/null | grep -E '^${SESSION_NAME}( |$)' | grep -vq EXITED; then
+  exec "$Z" attach ${SESSION_NAME}
 else
-  "$Z" delete-session claude-safari >/dev/null 2>&1
-  exec "$Z" --session claude-safari --new-session-with-layout "${SESSION_KDL}"
+  "$Z" delete-session ${SESSION_NAME} >/dev/null 2>&1
+  exec "$Z" --session ${SESSION_NAME} --new-session-with-layout "${SESSION_KDL}"
 fi
 `;
     fs.writeFileSync(SESSION_KDL, layout, { mode: 0o644 });
