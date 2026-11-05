@@ -8,4 +8,12 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 rm -f "$PLIST"
-echo "Chrome / Brave bridge stopped and LaunchAgent removed. State folder ~/.claude-chromium-bridge was kept."
+echo "Chrome / Brave bridge stopped and LaunchAgent removed."
+
+# Remove the two Chrome / Brave MCP servers from Claude Code, if claude is installed. Failures are ignored.
+if command -v claude >/dev/null 2>&1; then
+  claude mcp remove --scope user chromium >/dev/null 2>&1 || true
+  claude mcp remove --scope user chromium-assistant >/dev/null 2>&1 || true
+fi
+
+echo "State folder ~/.claude-chromium-bridge was kept."

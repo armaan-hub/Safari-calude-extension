@@ -19,11 +19,20 @@ if ! { [ -x /opt/homebrew/bin/zellij ] || [ -x /usr/local/bin/zellij ] || comman
   echo "Optional: brew install zellij  (auto-opens a Claude Code terminal session when you share a tab in Chrome or Brave)"
 fi
 [ -f "$BRIDGE" ] || { echo "Missing $BRIDGE"; exit 1; }
+# Build the unpacked extension if it is not there yet (skipped when it already exists).
+if [ ! -f "$BRIDGE_DIR/../dist/chromium/manifest.json" ]; then
+  echo "dist/chromium is missing; building it with build-chromium.sh..."
+  bash "$BRIDGE_DIR/../build-chromium.sh" || { echo "Building dist/chromium failed. Run ./build-chromium.sh and retry."; exit 1; }
+fi
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 
 # Own state folder for this bridge (token, allowed sites, profile, resume, queue). Owner-only, created before start.
 mkdir -p -m 700 "$STATE_DIR"
 chmod 700 "$STATE_DIR"
+
+# The one extension origin the bridge accepts on /ext/* (derived from the public key in tools/). Refuse to install without it.
+EXT_ORIGIN="$(node "$BRIDGE_DIR/chromium-id.mjs")" || EXT_ORIGIN=""
+[ -n "$EXT_ORIGIN" ] || { echo "Could not derive the extension origin from tools/chromium-extension-key.txt. Run: node bridge/chromium-id.mjs"; exit 1; }
 
 cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -51,6 +60,8 @@ cat > "$PLIST" <<PLIST_EOF
     <string>$PORT_NUM</string>
     <key>CLAUDE_BRIDGE_HOME</key>
     <string>$STATE_DIR</string>
+    <key>CLAUDE_EXT_ORIGIN</key>
+    <string>$EXT_ORIGIN</string>
     <key>CLAUDE_ZELLIJ_SESSION</key>
     <string>claude-chromium</string>
   </dict>
@@ -78,8 +89,25 @@ if ! launchctl bootstrap "gui/$(id -u)" "$PLIST"; then
 fi
 
 echo "Chrome / Brave bridge installed on port $PORT_NUM, state folder $STATE_DIR."
-echo "Register its MCP servers (chromium, chromium-assistant) with Claude Code as described in INSTALL.md, section Chrome and Brave."
 echo "Risky Chrome or Brave actions (post, send, submit) ask you to Allow in Claude Code, or on the shared tab. Claude cannot approve them itself."
+
+# Register the two Chrome / Brave MCP servers with Claude Code (user scope). Idempotent. Never fatal.
+register_mcp() {
+  local name="$1" server="$2"
+  if claude mcp get "$name" >/dev/null 2>&1; then
+    echo "Claude Code already has the $name MCP server."
+  elif claude mcp add --scope user "$name" -e SAFARI_BRIDGE_PORT=$PORT_NUM -e CLAUDE_BRIDGE_HOME=$STATE_DIR -- "$NODE" "$server"; then
+    echo "Added the $name MCP server to Claude Code."
+  else
+    echo "Could not add the $name MCP server. Run: claude mcp add --scope user $name -e SAFARI_BRIDGE_PORT=$PORT_NUM -e CLAUDE_BRIDGE_HOME=$STATE_DIR -- \"$NODE\" \"$server\""
+  fi
+}
+if command -v claude >/dev/null 2>&1; then
+  register_mcp chromium "$BRIDGE_DIR/safari-mcp.mjs" || true
+  register_mcp chromium-assistant "$BRIDGE_DIR/assistant-mcp.mjs" || true
+else
+  echo "claude not found on PATH; skipped the chromium MCP servers (chromium, chromium-assistant)."
+fi
 
 sleep 2
 if HEALTH="$(curl -s --max-time 3 http://127.0.0.1:$PORT_NUM/health)"; then
@@ -88,3 +116,6 @@ else
   echo "Chrome / Brave bridge did not answer yet. Check the log: $LOG"
   exit 1
 fi
+
+EXT_ID="${EXT_ORIGIN#chrome-extension://}"
+echo "Now load dist/chromium in Chrome or Brave (Load unpacked) and click the extension icon on a tab. Extension ID: $EXT_ID."

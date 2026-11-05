@@ -36,11 +36,49 @@ test('neither script mentions 8787 or the Safari label or Safari session', () =>
     assert.equal(text.includes('8787'), false);
     assert.equal(text.includes('com.armaan.claude-safari-bridge'), false);
     assert.equal(text.includes('claude-safari'), false);
-    assert.equal(/safari/i.test(text), false);
+    // SAFARI_BRIDGE_PORT (env name the MCP server reads) and safari-mcp.mjs (the server file) are the allowed uses of the word.
+    assert.equal(/safari/i.test(text.replace(/SAFARI_BRIDGE_PORT/g, '').replace(/safari-mcp\.mjs/g, '')), false);
   }
+});
+
+test('install-chromium.sh builds dist/chromium if missing and registers the two MCP servers', () => {
+  assert.ok(installText.includes('build-chromium.sh'));
+  assert.ok(installText.includes('claude mcp add --scope user'));
+  assert.ok(installText.includes('chromium-assistant'));
+  assert.ok(installText.includes('CLAUDE_BRIDGE_HOME'));
+});
+
+test('uninstall-chromium.sh removes the two MCP servers', () => {
+  assert.ok(uninstallText.includes('claude mcp remove'));
+  assert.ok(uninstallText.includes('chromium-assistant'));
+});
+
+test('install.sh runs the Chrome / Brave installer behind SKIP_CHROMIUM, and stays Safari-only otherwise', () => {
+  const safariInstall = fs.readFileSync(path.join(bridgeDir, 'install.sh'), 'utf8');
+  assert.ok(safariInstall.includes('install-chromium.sh'));
+  assert.ok(safariInstall.includes('SKIP_CHROMIUM'));
+  assert.ok(safariInstall.includes('com.armaan.claude-safari-bridge'));
+  assert.ok(safariInstall.includes('8787'));
+  assert.equal(safariInstall.includes('8788'), false);
+  assert.equal(safariInstall.includes('CLAUDE_EXT_ORIGIN'), false);
+  execFileSync('bash', ['-n', path.join(bridgeDir, 'install.sh')], { stdio: 'pipe' });
+});
+
+test('uninstall.sh calls uninstall-chromium.sh unless SKIP_CHROMIUM=1', () => {
+  const safariUninstall = fs.readFileSync(path.join(bridgeDir, 'uninstall.sh'), 'utf8');
+  assert.ok(safariUninstall.includes('uninstall-chromium.sh'));
+  assert.ok(safariUninstall.includes('SKIP_CHROMIUM'));
+  execFileSync('bash', ['-n', path.join(bridgeDir, 'uninstall.sh')], { stdio: 'pipe' });
 });
 
 test('both scripts pass bash -n', () => {
   execFileSync('bash', ['-n', install], { stdio: 'pipe' });
   execFileSync('bash', ['-n', uninstall], { stdio: 'pipe' });
+});
+
+test('install-chromium.sh sets CLAUDE_EXT_ORIGIN from chromium-id.mjs; the Safari install.sh never does', () => {
+  assert.ok(installText.includes('CLAUDE_EXT_ORIGIN'));
+  assert.ok(installText.includes('chromium-id.mjs'));
+  const safariInstall = fs.readFileSync(path.join(bridgeDir, 'install.sh'), 'utf8');
+  assert.equal(safariInstall.includes('CLAUDE_EXT_ORIGIN'), false);
 });

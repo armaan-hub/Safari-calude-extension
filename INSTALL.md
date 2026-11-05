@@ -180,35 +180,29 @@ The extension also runs in Google Chrome and Brave. Chromium is a **separate ins
 bridge process on `127.0.0.1:8788`, its own state folder, its own LaunchAgent, its own Zellij session and its own
 Claude Code MCP servers. Safari and Chromium can run at the same time without sharing tabs, approvals, tokens or state.
 
-**(a) Build** (no Xcode, works offline):
+**1. Install.** One command sets up both browsers:
 
 ```bash
 cd ~/claude-web-extension
-./build-chromium.sh          # writes dist/chromium (already pointed at port 8788)
-./build-chromium.sh --zip    # also writes dist/claude-code-chromium.zip
+bash bridge/install.sh       # Safari bridge, then the Chrome / Brave bridge
 ```
 
-**(b) Install the Chrome / Brave bridge** (LaunchAgent `com.armaan.claude-chromium-bridge`):
+- Only Chrome / Brave: `bash bridge/install-chromium.sh`. To skip it in the Safari command: `SKIP_CHROMIUM=1 bash bridge/install.sh`.
+- Both installers are safe to re-run.
+- The installer builds `dist/chromium` if it is missing. To rebuild it by hand: `./build-chromium.sh` (add `--zip` for `dist/claude-code-chromium.zip`).
 
-```bash
-cd ~/claude-web-extension
-./bridge/install-chromium.sh     # state folder ~/.claude-chromium-bridge (mode 700), log ~/Library/Logs/claude-chromium-bridge.log
-./bridge/uninstall-chromium.sh   # stops it and removes the LaunchAgent (keeps the state folder)
-```
+**2. Load the extension** (once): open `chrome://extensions` (Brave: `brave://extensions`), turn on **Developer mode**, click **Load unpacked** and pick `~/claude-web-extension/dist/chromium`.
 
-**(c) Load the extension:**
+**3. Share a tab:** click the toolbar icon, or press **Alt+Shift+C** on a tab.
 
-1. Open `chrome://extensions` (Brave: `brave://extensions`) and turn on **Developer mode**.
-2. Click **Load unpacked** and pick `~/claude-web-extension/dist/chromium`.
-3. Click the toolbar icon, or press **Alt+Shift+C** on a tab, to share that tab with Claude.
+Plain facts:
 
-**(d) Register the Chromium MCP servers with Claude Code** (once; separate from the Safari servers `safari` and `assistant`):
-
-```bash
-claude mcp add --scope user chromium -e SAFARI_BRIDGE_PORT=8788 -e CLAUDE_BRIDGE_HOME=$HOME/.claude-chromium-bridge -- node ~/claude-web-extension/bridge/safari-mcp.mjs
-claude mcp add --scope user chromium-assistant -e SAFARI_BRIDGE_PORT=8788 -e CLAUDE_BRIDGE_HOME=$HOME/.claude-chromium-bridge -- node ~/claude-web-extension/bridge/assistant-mcp.mjs
-claude mcp list      # should show chromium and chromium-assistant
-```
+- The bridge starts at every login and restarts if it stops. After the first install nothing needs to be started by hand.
+- Run the installer again only after you pull new bridge code.
+- If you rebuild the extension, its ID stays the same (pinned by `tools/chromium-extension-key.txt`).
+- The installer registers the Claude Code MCP servers `chromium` and `chromium-assistant` for you.
+- To stop the Chrome / Brave bridge: `bash bridge/uninstall-chromium.sh` (keeps the state folder).
+- Troubleshooting, if the registration failed, run by hand: `claude mcp add --scope user chromium -e SAFARI_BRIDGE_PORT=8788 -e CLAUDE_BRIDGE_HOME=$HOME/.claude-chromium-bridge -- node ~/claude-web-extension/bridge/safari-mcp.mjs` (the same for `chromium-assistant` with `bridge/assistant-mcp.mjs`).
 
 **Notes:**
 

@@ -17,3 +17,9 @@ if [ -f "$JOBWATCH_PLIST" ]; then
   rm -f "$JOBWATCH_PLIST"
   echo "Job watcher LaunchAgent removed."
 fi
+
+# Chrome / Brave bridge, unless SKIP_CHROMIUM=1. Non-fatal.
+UNINSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ "${SKIP_CHROMIUM:-}" != "1" ] && [ -f "$UNINSTALL_DIR/uninstall-chromium.sh" ]; then
+  bash "$UNINSTALL_DIR/uninstall-chromium.sh" || true
+fi

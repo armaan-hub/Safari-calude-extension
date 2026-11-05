@@ -83,3 +83,10 @@ test('dist/chromium contains no 8787 anywhere', () => {
   walk(dist);
   assert.deepEqual(hits, []);
 });
+
+test('the staged manifest carries the stable key; the Safari manifest has none', () => {
+  const m = readJson(path.join(dist, 'manifest.json'));
+  const keyFile = fs.readFileSync(path.join(root, 'tools', 'chromium-extension-key.txt'), 'utf8').trim();
+  assert.equal(m.key, keyFile);
+  assert.equal('key' in readJson(path.join(ext, 'manifest.json')), false);
+});

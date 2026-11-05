@@ -86,3 +86,8 @@ else
   echo "Bridge did not answer yet. Check the log: $LOG"
   exit 1
 fi
+
+# Chrome / Brave bridge: installed by the same command unless SKIP_CHROMIUM=1. Its failure never changes this exit status.
+if [ "${SKIP_CHROMIUM:-}" != "1" ] && [ -f "$BRIDGE_DIR/install-chromium.sh" ]; then
+  bash "$BRIDGE_DIR/install-chromium.sh" || echo "Chrome / Brave bridge install did not finish; run bridge/install-chromium.sh to retry."
+fi

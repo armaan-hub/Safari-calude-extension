@@ -18,7 +18,6 @@ const HOST = "127.0.0.1";
 const PORT = Number(process.env.PORT) || 8787;
 const BODY_CAP = 25 * 1024 * 1024;
 const TIMEOUT_MS = 180_000;
-const ORIGIN_RE = /^(safari-web-extension|chrome-extension|moz-extension):\/\//;
 // Work folder for the claude subprocess. Default unchanged; a second instance (CLAUDE_BRIDGE_HOME set, e.g. Chromium)
 // gets its own folder keyed by its resolved state folder, so the two bridges never share a work dir.
 const WORK_DIR = (process.env.CLAUDE_BRIDGE_HOME || "").trim()
@@ -977,6 +976,21 @@ const MCP_TOOLS = new Set([
 ]);
 // Only the extension origin may use /ext/*. (Safari sends no Origin on simple GETs; those need x-claude-bridge.)
 const SAFARI_ORIGIN_RE = /^safari-web-extension:\/\//;
+// Optional exact origin of the Chromium/Brave build (set by install-chromium.sh). Exact match only; any other
+// chrome-extension:// origin stays refused on /ext/*. An invalid value is ignored with one log line.
+const EXT_ORIGIN_RE = /^chrome-extension:\/\/[a-p]{32}$/;
+const CLAUDE_EXT_ORIGIN = (() => {
+  const raw = (process.env.CLAUDE_EXT_ORIGIN || "").trim();
+  if (!raw) return null;
+  if (EXT_ORIGIN_RE.test(raw)) return raw;
+  console.error("claude-bridge: CLAUDE_EXT_ORIGIN ignored (not a chrome-extension:// origin)");
+  return null;
+})();
+function extOriginOk(origin) {
+  if (typeof origin !== "string") return false;
+  if (SAFARI_ORIGIN_RE.test(origin)) return true;
+  return CLAUDE_EXT_ORIGIN !== null && origin === CLAUDE_EXT_ORIGIN;
+}
 const HOST_OK = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 const mcpQueue = []; // commands not yet handed to the extension
 const mcpWaiting = new Map(); // id -> {cmd, res, timer}: /mcp/call requests waiting for a result
@@ -1386,11 +1400,11 @@ async function handleTerminal(req, res, pathname, origin, authOk, cors) {
     if (req.method === "POST" && pathname === "/mcp/approval") return mcpApproval(req, res);
     return send(res, 404, errBody("not_found", "No such route"));
   }
-  // /ext/*: the Safari extension only (not a Chrome/Firefox extension, not a web page).
+  // /ext/*: the Safari extension, or the one configured Chromium extension origin (not any other extension, not a web page).
   const extOk =
-    (typeof origin === "string" && SAFARI_ORIGIN_RE.test(origin)) ||
+    extOriginOk(origin) ||
     (origin === undefined && req.method === "GET" && req.headers["x-claude-bridge"] === "1");
-  if (!extOk) return send(res, 403, errBody("forbidden", "Safari extension origin required"));
+  if (!extOk) return send(res, 403, errBody("forbidden", "Extension origin required"));
   if (req.method === "GET" && pathname === "/ext/poll") return extPoll(res, cors);
   if (req.method === "GET" && pathname === "/ext/sites") return extSites(res, cors);
   if (req.method === "POST" && pathname === "/ext/result") return extResult(req, res, cors);
@@ -1407,7 +1421,7 @@ const server = http.createServer((req, res) => {
     return send(res, 403, errBody("forbidden", "Host not allowed"));
   }
   const origin = req.headers.origin;
-  const originOk = typeof origin === "string" && ORIGIN_RE.test(origin);
+  const originOk = extOriginOk(origin);
   // Safari omits Origin on simple GETs from the extension; accept those only with the custom header.
   const authOk = originOk || (origin === undefined && req.headers["x-claude-bridge"] === "1");
   if (origin !== undefined && !originOk) {

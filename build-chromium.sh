@@ -39,12 +39,24 @@ node -e "$JS" "$OUT/manifest.json"
 # Chrome MV3 service workers load classic scripts with importScripts, not a background "scripts" list.
 printf '%s\n' 'importScripts("term-sites.js", "background.js");' > "$OUT/sw.js"
 
+# Stable extension ID: the public key (one base64 line) goes into the STAGED manifest only. Fails if missing or empty.
+KEY_FILE="$ROOT/tools/chromium-extension-key.txt"
+if [ ! -s "$KEY_FILE" ] || [ -z "$(tr -d '[:space:]' < "$KEY_FILE")" ]; then
+  echo "build-chromium: public key missing or empty: $KEY_FILE" >&2
+  exit 1
+fi
+
 # Point the Chromium copy at its own bridge (port 8788), so Safari (8787) and Chromium never share a bridge.
 # Node edits of the staged files only; extension/ is never changed.
 PORT_JS='
 const fs = require("fs");
 const path = require("path");
 const dir = process.argv[1];
+const key = fs.readFileSync(process.argv[2], "utf8").trim();
+if (!key) {
+  console.error("build-chromium: public key file is empty");
+  process.exit(1);
+}
 const OLD_BASE = "const BRIDGE_BASE = \"http://127.0.0.1:8787\";";
 const NEW_BASE = "const BRIDGE_BASE = \"http://127.0.0.1:8788\";";
 const bgFile = path.join(dir, "background.js");
@@ -64,9 +76,10 @@ if (i < 0) {
 }
 hp[i] = "http://127.0.0.1:8788/*";
 m.host_permissions = hp;
+m.key = key;
 fs.writeFileSync(mFile, JSON.stringify(m, null, 2) + "\n");
 '
-node -e "$PORT_JS" "$OUT"
+node -e "$PORT_JS" "$OUT" "$KEY_FILE"
 
 # Fail the build if any Safari port is left anywhere in the Chromium copy (content.js, term-sites.js and panel files included).
 if grep -rl "8787" "$OUT" >/dev/null 2>&1; then
@@ -75,6 +88,9 @@ if grep -rl "8787" "$OUT" >/dev/null 2>&1; then
   exit 1
 fi
 echo "Port check: no 8787 in dist/chromium (content.js, term-sites.js and panel files clean); bridge port is 8788."
+
+EXT_ORIGIN="$(node "$ROOT/bridge/chromium-id.mjs")"
+echo "Extension ID: ${EXT_ORIGIN#chrome-extension://}"
 
 if [ "$want_zip" -eq 1 ]; then
   rm -f "$ZIP_OUT"
