@@ -6,7 +6,7 @@
   "permissions": ["storage", "tabs", "activeTab", "scripting", "alarms"],
   "host_permissions": ["<all_urls>", "http://127.0.0.1:8787/*"],
   "background": {
-    "scripts": ["background.js"],
+    "scripts": ["term-sites.js", "background.js"],
     "persistent": false
   },
   "content_scripts": [
@@ -37,6 +37,10 @@
     "toggle-claude": {
       "suggested_key": { "default": "Alt+Shift+C" },
       "description": "Share or unshare this tab with Claude Code"
+    },
+    "share-all": {
+      "suggested_key": { "default": "Alt+Shift+A" },
+      "description": "Share or unshare all tabs in this window with Claude Code"
     }
   }
 }

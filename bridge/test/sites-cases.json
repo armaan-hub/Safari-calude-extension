@@ -1,0 +1,10 @@
+[
+  { "url": "https://linkedin.com.evil.test/", "allowed": false },
+  { "url": "https://evil-linkedin.com/", "allowed": false },
+  { "url": "https://linkedin.com@evil.test/", "allowed": false },
+  { "url": "http://linkedin.com/", "allowed": false },
+  { "url": "HTTPS://LinkedIn.com./", "allowed": true },
+  { "url": "https://www.linkedin.com/jobs", "allowed": true },
+  { "url": "https://sub.deep.linkedin.com/x", "allowed": true },
+  { "url": "https://linkedin.com:8443/x", "allowed": true }
+]

@@ -38,7 +38,9 @@ Safari extension  <-- long-poll -->  local bridge (127.0.0.1:8787, LaunchAgent) 
 - **Terminal mode:** click the toolbar icon on a tab to share it (the icon shows **ON**). Claude Code can act only on shared tabs. Sharing a tab also opens a Terminal with a [Zellij](https://zellij.dev) session named `claude-safari` running Claude Code, or reattaches it if it already exists.
 - **Panel mode:** the panel sends your message to the bridge, which runs `claude -p` with your Claude login. Alternatively, paste an Anthropic API key in the panel settings (gear icon).
 
-Claude Code tools in terminal mode: `safari_status`, `read_page`, `get_page_text`, `click`, `type`, `press_key`, `scroll`, `navigate`, `screenshot`.
+Claude Code tools in terminal mode: `safari_status`, `read_page`, `get_page_text`, `click`, `type`, `press_key`, `scroll`, `navigate`, `wait`, `screenshot`.
+
+**The auto-opened session is Safari-only.** It starts Claude Code with just the `safari` tools (no shell, no file access, no other browser or MCP server) and instructions to do Safari work only. For anything else, open a normal `claude` session in another terminal.
 
 ## Safety
 

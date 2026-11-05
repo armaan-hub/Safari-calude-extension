@@ -134,7 +134,11 @@ Keep the folder where it is: the bridge runs from it. If you move the folder, ru
 3. Ask Claude Code, e.g. *"Read my Safari tab and summarise it"* or *"Draft a LinkedIn post in the composer on my shared tab"*.
 4. Click the icon again to unshare the tab.
 
-The auto-opened session runs `claude --dangerously-skip-permissions`, which only skips Claude Code's own file/command prompts. Risky Safari clicks still ask **you**.
+The auto-opened session is **Safari-only**: it runs `claude --dangerously-skip-permissions --strict-mcp-config --tools ""` with only the `safari` tools loaded, so it has no shell, no file access and no other browser, and it is told to refuse non-Safari work. Risky Safari clicks still ask **you**. For other work, run a normal `claude` in another terminal.
+
+To restart the session after an update (it keeps the old settings until it is recreated): `zellij delete-session claude-safari --force`, then click the dark icon on a tab again.
+
+Risky clicks (Post, Send, Publish, Share...) show an **Allow / Deny** pill in Safari. If Terminal covers Safari you will not see it: keep Safari visible next to Terminal, or switch to Safari when Claude pauses. Opening a composer ("Start a post", "New message", "Compose") needs no approval.
 
 ### Panel mode (Claude Panel for Safari, cream icon)
 
@@ -154,6 +158,7 @@ The auto-opened session runs `claude --dangerously-skip-permissions`, which only
 | Bridge not reachable / panel dot red | `curl http://127.0.0.1:8787/health`. If nothing answers, run `./bridge/install.sh` again and read `~/Library/Logs/claude-safari-bridge.log`. |
 | Claude Code has no `safari` tools | `claude mcp list` should show `safari`. If not: `claude mcp add --scope user safari -- node ~/claude-web-extension/bridge/safari-mcp.mjs`, then restart Claude Code. |
 | "Tab not shared" | Click the dark icon on that tab so it shows **ON**. |
+| A click "did nothing" on WhatsApp/LinkedIn | These pages update slowly. Claude is told to `wait` and re-read before retrying. If it still fails, click the item yourself once and ask Claude to continue. |
 | No Terminal opens on share | `brew install zellij`; check `~/.claude-safari-bridge/auto-session-off` does not exist; see the bridge log. |
 | `build-safari.sh`: no signing team | Create the Apple Development certificate (step 3B.2) or pass `TEAM_ID=...`. |
 | `build-safari.sh`: bundle id taken | `BUNDLE_PREFIX=com.yourname ./build-safari.sh` |

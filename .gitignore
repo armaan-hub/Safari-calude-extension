@@ -8,3 +8,13 @@ PLAN.md
 CLAUDE.md
 .DS_Store
 *.log
+# Job Watcher: personal data and run state must never be committed
+profile.json
+seen.json
+queue.json
+ready.html
+jobwatch-mcp.json
+run.lock
+*.corrupt-*
+.claude-safari-bridge/
+profile.md

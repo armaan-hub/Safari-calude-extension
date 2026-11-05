@@ -152,6 +152,16 @@ build_variant() {
   patch_exact "$man" "\"default\": \"$SRC_KEY\"" "\"default\": \"$V_KEY\"" 1
   patch_exact "$man" "\"description\": \"$SRC_DESC\"" "\"description\": \"$V_DESC\"" 1
   patch_exact "$man" "icons/$SRC_MODE/" "icons/$V_MODE/" 10
+  # The panel build has no bridge to share tabs with, so it must not ship the share-all command.
+  if [ "$V_MODE" = "panel" ]; then
+    patch_exact "$man" $',\n    "share-all": {\n      "suggested_key": { "default": "Alt+Shift+A" },\n      "description": "Share or unshare all tabs in this window with Claude Code"\n    }' "" 1
+    python3 -I - "$man" <<'CHECK'
+import json, sys
+cmds = json.load(open(sys.argv[1], encoding="utf-8")).get("commands", {})
+if "share-all" in cmds or "toggle-claude" not in cmds:
+    sys.exit("manifest check failed: panel manifest must keep toggle-claude and drop share-all")
+CHECK
+  fi
   # Ship only this variant's icon set.
   if [ "$V_MODE" = "terminal" ]; then rm -rf "$stage/icons/panel"; else rm -rf "$stage/icons/terminal"; fi
 

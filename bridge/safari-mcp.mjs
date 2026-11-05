@@ -8,10 +8,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { describeToolCall } from "./jobwatch-activity.mjs";
+import { loadSites, urlAllowed } from "./sites.mjs";
+import { appendActivity, stateDir } from "./jobwatch-state.mjs";
 
 const BRIDGE_PORT = Number(process.env.SAFARI_BRIDGE_PORT) || 8787;
 const BRIDGE = `http://127.0.0.1:${BRIDGE_PORT}`;
 const TOKEN_FILE = path.join(os.homedir(), ".claude-safari-bridge", "mcp-token");
+// Switch file set by the user: while it exists, the one click that opens a LinkedIn Easy Apply form is allowed without asking.
+const AUTO_ALLOW_FILE = path.join(os.homedir(), ".claude-safari-bridge", "auto-allow-apply");
+const AUTO_ALLOW_LABEL = /^click\s+[\u201C"']?easy apply(?: to this job)?[\u201D"']?\s*$/i;
+const AUTO_ALLOW_MAX = 10;
+const AUTO_ALLOW_WINDOW_MS = 60 * 60_000;
+const autoAllowTimes = []; // timestamps (ms) of auto-allows in this process
 const DEFAULT_PROTOCOL = "2025-06-18";
 const SERVER_INFO = { name: "safari", version: "0.1.0" };
 // The bridge answers after at most 90 s; leave a margin.
@@ -20,9 +29,96 @@ const HTTP_TIMEOUT_MS = 100_000;
 const APPROVAL_MS = 5 * 60_000;
 const APPROVAL_HTTP_TIMEOUT_MS = 420_000;
 const NOT_RUNNING = `Safari bridge not running (127.0.0.1:${BRIDGE_PORT}). Start it with bridge/install.sh.`;
+// Deny-risky mode (Job Watcher): risky actions are declined and submitting keys are refused. Off unless the env var is "1".
+const DENY_RISKY = process.env.SAFARI_MCP_DENY_RISKY === "1";
+const DENY_MESSAGE = "Blocked: the Job Watcher never submits, sends or posts. Do not retry this action.";
+const DENY_NAV_MESSAGE = "Blocked: the Job Watcher may only open LinkedIn pages.";
+const DENY_BUDGET_MESSAGE = "Blocked: the Job Watcher's tool-call budget for this run is used up. Give your final answer now.";
+// Deny mode only: the only keys that may be pressed (compared trimmed and lower-cased).
+const DENY_KEYS = new Set(["tab", "escape", "arrowup", "arrowdown", "arrowleft", "arrowright", "home", "end", "pageup", "pagedown"]);
+// Deny mode only: optional cap on tool calls per run (positive integer; anything else = no cap).
+const MAX_CALLS = DENY_RISKY && /^[1-9][0-9]*$/.test(process.env.SAFARI_MCP_MAX_CALLS ?? "") ? Number(process.env.SAFARI_MCP_MAX_CALLS) : null;
+let callCount = 0;
+
+// Terminal mode: the host shown in the refusal, from the URL when it parses, else a placeholder.
+function urlHostForMessage(url) {
+  try {
+    return new URL(url).hostname || "<host>";
+  } catch {
+    return "<host>";
+  }
+}
+
+function allowedDenyUrl(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  return u.protocol === "https:" && (u.hostname === "linkedin.com" || u.hostname.endsWith(".linkedin.com"));
+}
 
 function log(...parts) {
   process.stderr.write(`[safari-mcp] ${parts.join(" ")}\n`);
+}
+
+// ---------- live activity feed ----------
+// Every Safari tool call writes one plain-English line to the Job Watcher feed (activity.log). The watcher's MCP
+// config sets SAFARI_MCP_SOURCE=watcher; a terminal session has no such variable. Logging never throws and never
+// changes a tool result.
+const SOURCE = process.env.SAFARI_MCP_SOURCE === "watcher" ? "watcher" : "terminal";
+const FEED_SUFFIX_MAX = 80;
+const FEED_ERROR_MAX = 120;
+const FEED_LABEL_MAX = 100;
+const RESULT_TEXT_TOOLS = new Set(["click", "type", "navigate", "press_key", "scroll"]);
+const LENGTH_TOOLS = new Set(["read_page", "get_page_text"]);
+
+function feedLine(line) {
+  try {
+    appendActivity(stateDir(), line);
+  } catch {
+    // The feed is best effort: an unwritable directory must not affect the tool.
+  }
+}
+
+function collapseText(s) {
+  return String(s).replace(/\s+/g, " ").trim();
+}
+
+function resultText(result) {
+  const parts = Array.isArray(result.content) ? result.content : [];
+  return parts
+    .filter((p) => p && p.type === "text" && typeof p.text === "string")
+    .map((p) => p.text)
+    .join("\n");
+}
+
+// The outcome part of a feed line: result text, character count, or the refusal or error.
+function outcomeSuffix(name, result) {
+  const text = resultText(result);
+  if (result.isError) {
+    const message = text.replace(/^Error:\s*/, "");
+    if (message.startsWith("Blocked:")) {
+      return ` -> blocked: ${collapseText(message.slice("Blocked:".length)).slice(0, FEED_ERROR_MAX)}`;
+    }
+    return ` -> error: ${collapseText(message).slice(0, FEED_ERROR_MAX)}`;
+  }
+  if (LENGTH_TOOLS.has(name)) return ` (${text.length} chars)`;
+  if (RESULT_TEXT_TOOLS.has(name) && collapseText(text)) {
+    return ` -> ${collapseText(text).slice(0, FEED_SUFFIX_MAX)}`;
+  }
+  return "";
+}
+
+function logCall(name, args, result) {
+  try {
+    if (name === "safari_status") return;
+    const what = describeToolCall(name, args, { showTyped: SOURCE === "watcher" });
+    feedLine(`[${SOURCE}] ${what}${outcomeSuffix(name, result)}`);
+  } catch {
+    // Logging must never change the result.
+  }
 }
 
 process.stdout.on("error", () => process.exit(0));
@@ -100,6 +196,18 @@ const TOOL_DEFS = [
     ["url"],
   ),
   tabTool(
+    "open_tab",
+    "Open a new background tab at an https URL on the user's allowed sites list, in the same window as the shared tab tab_id. The new tab is shared automatically so you can continue there. Limited to 5 per hour and 10 shared tabs.",
+    { url: { type: "string", description: "https URL on the allowed list" } },
+    ["url"],
+  ),
+  tabTool(
+    "wait",
+    "Wait a number of seconds (max 10) for the page to update, e.g. after a click. Then call read_page again.",
+    { seconds: { type: "number" } },
+    ["seconds"],
+  ),
+  tabTool(
     "screenshot",
     "Capture the visible part of the shared tab as an image. If the tab is not the active tab, the user must bring it to the front.",
   ),
@@ -112,6 +220,11 @@ const TOOL_DEFS = [
 ];
 
 const TOOL_BY_NAME = new Map(TOOL_DEFS.map((t) => [t.name, t]));
+
+// open_tab exists only in terminal mode: the Job Watcher (SOURCE watcher) and deny-risky mode never see it.
+function toolVisible(name) {
+  return !(name === "open_tab" && (SOURCE === "watcher" || DENY_RISKY));
+}
 
 // Checks the arguments against the tool's schema (types, enums, required). Returns an error message, or null.
 function validate(name, args) {
@@ -126,6 +239,7 @@ function validate(name, args) {
     if (v === undefined) continue;
     if (spec.type === "string" && typeof v !== "string") return `${key} must be a string.`;
     if (spec.type === "boolean" && typeof v !== "boolean") return `${key} must be true or false.`;
+    if (spec.type === "number" && (typeof v !== "number" || !Number.isFinite(v))) return `${key} must be a number.`;
     if (spec.type === "integer" && !Number.isInteger(v)) return `${key} must be an integer.`;
     if (spec.enum && !spec.enum.includes(v)) return `${key} must be one of: ${spec.enum.join(", ")}.`;
     if (spec.type === "string" && key !== "text" && v.trim() === "") return `${key} must not be empty.`;
@@ -270,32 +384,98 @@ async function elicitAllow(question) {
   return !!(r && !r.error && r.result && r.result.action === "accept" && r.result.content && r.result.content.allow === true);
 }
 
+// True only for the Easy Apply open click, with the switch file present, an allowed site and fewer than
+// AUTO_ALLOW_MAX auto-allows in the last hour. Recording the allow happens here, when it is granted.
+function autoAllowApply(data) {
+  try {
+    if (!fs.existsSync(AUTO_ALLOW_FILE)) return false;
+    if (DENY_RISKY) return false;
+    const label = approvalQuestion(data).label;
+    if (!AUTO_ALLOW_LABEL.test(label)) return false;
+    if (typeof data.tab_url !== "string" || !urlAllowed(data.tab_url, loadSites())) return false;
+    const now = Date.now();
+    while (autoAllowTimes.length && now - autoAllowTimes[0] > AUTO_ALLOW_WINDOW_MS) autoAllowTimes.shift();
+    if (autoAllowTimes.length >= AUTO_ALLOW_MAX) return false;
+    autoAllowTimes.push(now);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function handleApproval(data, token) {
   if (typeof data.approval_id !== "string" || !data.approval_id) return errorResult("Safari sent a malformed approval request.");
+  if (DENY_RISKY) {
+    // Never approved: the bridge is told "no" and the model gets a refusal it must not retry.
+    await bridge("POST", "/mcp/approval", token, { approval_id: data.approval_id, approve: false }, APPROVAL_HTTP_TIMEOUT_MS);
+    return errorResult(DENY_MESSAGE);
+  }
   const q = approvalQuestion(data);
   let body;
-  if (clientCanElicit) {
-    const allow = await elicitAllow(q.text);
-    body = { approval_id: data.approval_id, approve: allow };
+  if (autoAllowApply(data)) {
+    feedLine(`[${SOURCE}] auto-allowed opening the Easy Apply form (switch file present); Submit still needs the human`);
+    body = { approval_id: data.approval_id, approve: true };
   } else {
-    body = { approval_id: data.approval_id }; // the human answers on the page; this call just waits
+    feedLine(`[${SOURCE}] waiting for your Allow in Safari: ${collapseText(q.label).slice(0, FEED_LABEL_MAX)}`);
+    if (clientCanElicit) {
+      const allow = await elicitAllow(q.text);
+      body = { approval_id: data.approval_id, approve: allow };
+    } else {
+      body = { approval_id: data.approval_id }; // the human answers on the page; this call just waits
+    }
   }
   const final = await bridge("POST", "/mcp/approval", token, body, APPROVAL_HTTP_TIMEOUT_MS);
   if (final.needs_approval) return errorResult("Safari asked for approval twice for one action; nothing more was done.");
+  // The extension worker restarted before the human answered: nothing was clicked. Tell the caller to re-ask once.
+  if (typeof final.error === "string" && final.error.startsWith("Approval lost")) return { approvalLost: true };
   if (typeof final.error !== "string" && body.approve === false) return errorResult(`User declined: ${q.label}`);
   return toolResult(final);
 }
 
 async function runTool(name, args) {
+  const result = await runToolChecked(name, args);
+  logCall(name, args, result);
+  return result;
+}
+
+async function runToolChecked(name, args) {
+  if (DENY_RISKY) {
+    // Deny-risky mode: budget, key allowlist, LinkedIn-only navigation and non-submitting typing; all before the bridge.
+    if (name !== "safari_status" && MAX_CALLS !== null && ++callCount > MAX_CALLS) return errorResult(DENY_BUDGET_MESSAGE);
+    if (name === "press_key" && !(typeof args.key === "string" && DENY_KEYS.has(args.key.trim().toLowerCase()))) {
+      return errorResult(DENY_MESSAGE);
+    }
+    if (name === "navigate" && !(typeof args.url === "string" && allowedDenyUrl(args.url.trim()))) {
+      return errorResult(DENY_NAV_MESSAGE);
+    }
+    if (name === "type" && args.submit === true) return errorResult(DENY_MESSAGE);
+  }
+  // Terminal mode: navigation (and opening a tab) only to the user's allowed sites. The list is read on every call.
+  if (!DENY_RISKY && (name === "navigate" || name === "open_tab") && !urlAllowed(args.url, loadSites())) {
+    return errorResult(
+      `Blocked: this site is not on the user's allowed list. Call site_request with host ${urlHostForMessage(args.url)}, country and reason, then carry on with the allowed sites. The user approves it with: node bridge/sites.mjs approve ${urlHostForMessage(args.url)} (node bridge/sites.mjs pending lists requests). Never edit the allowed list.`
+    );
+  }
   const bad = validate(name, args);
   if (bad) return errorResult(bad);
   const token = readToken();
   if (!token) return errorResult(`Safari bridge token not found at ${TOKEN_FILE}. Run bridge/install.sh.`);
   try {
     if (name === "safari_status") return statusResult(await bridge("GET", "/mcp/status", token));
-    const data = await bridge("POST", "/mcp/call", token, { tool: name, args: cleanArgs(name, args), elicit: clientCanElicit });
-    if (data.needs_approval) return await handleApproval(data, token);
-    return toolResult(data);
+    const callBody = { tool: name, args: cleanArgs(name, args), elicit: clientCanElicit };
+    const data = await bridge("POST", "/mcp/call", token, callBody);
+    if (!data.needs_approval) return toolResult(data);
+    const first = await handleApproval(data, token);
+    if (!(first && first.approvalLost === true)) return first;
+    // Safari lost the approval (extension restart). Ask once more with the same request; the human must Allow again.
+    feedLine(`[${SOURCE}] Safari lost the approval; asking again once`);
+    const data2 = await bridge("POST", "/mcp/call", token, callBody);
+    if (!data2.needs_approval) return toolResult(data2);
+    const second = await handleApproval(data2, token);
+    if (second && second.approvalLost === true) {
+      return errorResult("Safari lost the approval twice; the action may not have been done. Check the page, reload the tab if needed, and try again.");
+    }
+    return second;
   } catch (e) {
     return errorResult(e.message);
   }
@@ -316,10 +496,10 @@ async function onRequest(msg) {
     case "ping":
       return reply(id, {});
     case "tools/list":
-      return reply(id, { tools: TOOL_DEFS });
+      return reply(id, { tools: TOOL_DEFS.filter((t) => toolVisible(t.name)) });
     case "tools/call": {
       const name = params?.name;
-      if (typeof name !== "string" || !TOOL_BY_NAME.has(name)) {
+      if (typeof name !== "string" || !TOOL_BY_NAME.has(name) || !toolVisible(name)) {
         return fail(id, -32602, `Unknown tool: ${name}`);
       }
       const args = params.arguments ?? {};

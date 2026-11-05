@@ -3,10 +3,35 @@
 
 (() => {
   "use strict";
-  if (window.__claudeSafari) return;
-  window.__claudeSafari = true;
-
+  // "terminal" or "panel". build-safari.sh patches this line per variant (PLAN T15). Terminal keeps the names
+  // below as they are; the panel build suffixes its page-visible ids so both copies can share one page.
+  const BUILD_VARIANT = "terminal";
+  const ID_SUFFIX = BUILD_VARIANT === "panel" ? "-panel" : "";
   const api = typeof browser !== "undefined" ? browser : chrome;
+  if (window.__claudeSafari) {
+    // A live copy of this version is already running: do not double-load.
+    let alive = false;
+    try {
+      alive = typeof window.__claudeSafariAlive === "function" && window.__claudeSafariAlive() === true;
+    } catch (e) {
+      alive = false;
+    }
+    if (alive) return;
+    // Orphan of a dead or older copy (its extension context is gone): remove its UI and take over.
+    // Remove only this variant's own ids: the terminal and panel apps share the page DOM.
+    ["claude-safari-root", "claude-safari-status", "claude-safari-pointer"].forEach((base) => {
+      const n = document.getElementById(base + ID_SUFFIX);
+      if (n) n.remove();
+    });
+  }
+  window.__claudeSafari = true;
+  window.__claudeSafariAlive = () => {
+    try {
+      return !!(api && api.runtime && api.runtime.id);
+    } catch (e) {
+      return false;
+    }
+  };
   // Window mode (PLAN T12a): panel.html sets this before this script runs. The panel then fills its own
   // window, is always shown, and gets its messages from the background over the "claude-panel" port.
   const WINDOW_MODE = window.__CLAUDE_WINDOW_MODE__ === true;
@@ -14,10 +39,6 @@
   // True once the panel has been built and attached. Terminal mode (PLAN T13b) never sets it on a page.
   let panelMode = false;
   const DEFAULT_MODEL = "claude-sonnet-5-5";
-  // "terminal" or "panel". build-safari.sh patches this line per variant (PLAN T15). Terminal keeps the names
-  // below as they are; the panel build suffixes its page-visible ids so both copies can share one page.
-  const BUILD_VARIANT = "terminal";
-  const ID_SUFFIX = BUILD_VARIANT === "panel" ? "-panel" : "";
   const HOST_ID = "claude-safari-root" + ID_SUFFIX;
   const READ_CAP = 40000;
   const TEXT_CAP = 30000;
@@ -56,6 +77,9 @@
     "[role=option]",
     "[role=combobox]",
     "[role=switch]",
+    "[role=menuitemradio]",
+    "[role=menuitemcheckbox]",
+    "[role=treeitem]",
     '[contenteditable=""]',
     '[contenteditable="true"]',
     '[tabindex]:not([tabindex="-1"])',
@@ -204,6 +228,9 @@ button.icon.chip-x{width:22px;height:22px}
 .work-line[hidden]{display:none}
 .work-tab{display:inline;padding:0;border:0;background:none;color:var(--accent-hi);font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}
 .tab-chip.working{border-color:var(--accent);color:var(--accent-hi);font-weight:600}
+.page-actions{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px}
+.page-action{padding:4px 10px;border:1px solid var(--border);border-radius:999px;background:var(--bg);color:var(--text);font-size:12px;white-space:nowrap}
+.page-action:disabled{opacity:.5;cursor:default}
 .attach-note{font-size:12px;color:var(--bad);overflow-wrap:anywhere}
 .att-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;justify-content:flex-end}
 .att{display:flex;align-items:center;gap:6px;max-width:100%;padding:3px 8px 3px 3px;border-radius:8px;background:var(--bg);border:1px solid var(--border);font-size:12px}
@@ -885,6 +912,24 @@ button.send.stop{background:var(--text);color:#faf9f5}
 
   // Composer: rounded card with the input, then a foot row (model pill, send).
   const composerEl = make("div", "composer");
+  // Page buttons sit above the card and send a fixed instruction through the normal send path (no new tool).
+  const pageRow = make("div", "page-actions");
+  const pageActionDefs = [
+    ["Summarize page", "Summarize this page: what it is, the key facts, and what I can do here."],
+    ["Key details", "List the key details on this page (names, numbers, dates, prices, links) as a short list."],
+    ["Is this for me", "Is this page good for me? Compare it with what you know about me and say why or why not."],
+  ];
+  const pageBtns = pageActionDefs.map(([label, instruction]) => {
+    const b = make("button", "page-action", label);
+    b.type = "button";
+    b.setAttribute("aria-label", label);
+    b.addEventListener("click", () => {
+      inputEl.value = instruction;
+      sendChat();
+    });
+    pageRow.appendChild(b);
+    return b;
+  });
   const card = make("div", "card");
   const inputEl = make("textarea");
   inputEl.rows = 2;
@@ -930,7 +975,7 @@ button.send.stop{background:var(--text);color:#faf9f5}
   sendBtn.append(sendUp, stopSq);
   foot.append(attachBtn, modelBtn, sendBtn);
   card.append(skillChips, attachList, attachNote, inputEl, foot, slashMenu, modelMenu, fileInput);
-  composerEl.appendChild(card);
+  composerEl.append(pageRow, card);
 
   const dropHint = make("div", "drop-hint", "Drop files to attach");
   dropHint.hidden = true;
@@ -1816,6 +1861,7 @@ button.send.stop{background:var(--text);color:#faf9f5}
     sendUp.style.display = running ? "none" : "";
     stopSq.style.display = running ? "" : "none";
     sendBtn.classList.toggle("stop", running);
+    for (const b of pageBtns) b.disabled = running;
     sendBtn.title = running ? "Stop" : "Send";
     sendBtn.setAttribute("aria-label", running ? "Stop" : "Send");
     if (running) {
@@ -2554,14 +2600,49 @@ button.send.stop{background:var(--text);color:#faf9f5}
     return clip(clean(n || ""), 80);
   }
 
+  // The radio or checkbox a <label> controls, or null. Used for labels that stand in for a hidden control.
+  function labelControl(el) {
+    const c = el.control;
+    return c && c.tagName === "INPUT" && (c.type === "radio" || c.type === "checkbox") ? c : null;
+  }
+
+  // True when read_page would not list this control on its own (the same tests readPage's visit applies).
+  function controlUnlisted(c) {
+    if (c.hidden || c.getAttribute("aria-hidden") === "true") return true;
+    const win = c.ownerDocument.defaultView;
+    if (!win) return true;
+    const cs = win.getComputedStyle(c);
+    if (cs.display === "none") return true;
+    const r = c.getBoundingClientRect();
+    return cs.visibility === "hidden" || (r.width === 0 && r.height === 0);
+  }
+
+  // A generic click target the page styles as clickable (cursor: pointer) with no real control inside: the topmost
+  // such element, with a box and short text (80 characters or fewer). Cheap tests run first.
+  function isPointerTarget(el, tag) {
+    if (tag === "HTML" || tag === "BODY") return false;
+    const win = el.ownerDocument.defaultView;
+    if (!win) return false;
+    if (win.getComputedStyle(el).cursor !== "pointer") return false;
+    const p = el.parentElement;
+    if (p && p.ownerDocument.defaultView.getComputedStyle(p).cursor === "pointer") return false;
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return false;
+    const t = clean(el.getAttribute("aria-label") || el.textContent);
+    if (!t || t.length > 80) return false;
+    return !el.closest(INTERACTIVE_SEL) && !el.querySelector(INTERACTIVE_SEL);
+  }
+
   function describe(el) {
     const tag = el.tagName.toUpperCase();
     const role = (el.getAttribute("role") || "").toLowerCase();
     const type = tag === "INPUT" ? (el.type || "").toLowerCase() : "";
     const editable = el.matches('[contenteditable=""], [contenteditable="true"]');
     const label = accName(el);
+    const ctl = tag === "LABEL" ? labelControl(el) : null;
     let kind;
-    if ((tag === "INPUT" && type === "checkbox") || role === "checkbox") kind = "checkbox";
+    if (ctl) kind = ctl.type === "radio" ? "radio" : "checkbox";
+    else if ((tag === "INPUT" && type === "checkbox") || role === "checkbox") kind = "checkbox";
     else if ((tag === "INPUT" && type === "radio") || role === "radio") kind = "radio";
     else if ((tag === "INPUT" && type === "range") || role === "slider") kind = "slider";
     else if (tag === "INPUT" && ["button", "submit", "reset", "image"].includes(type)) kind = "button";
@@ -2576,7 +2657,7 @@ button.send.stop{background:var(--text);color:#faf9f5}
 
     const extra = [];
     if (kind === "checkbox" || kind === "radio" || kind === "switch") {
-      const checked = tag === "INPUT" ? el.checked : el.getAttribute("aria-checked") === "true";
+      const checked = ctl ? ctl.checked : tag === "INPUT" ? el.checked : el.getAttribute("aria-checked") === "true";
       if (checked) extra.push("(checked)");
     }
     if (kind === "select") {
@@ -2601,7 +2682,7 @@ button.send.stop{background:var(--text);color:#faf9f5}
       const href = el.getAttribute("href");
       if (href && href !== "#" && !href.startsWith("javascript:")) extra.push("→ " + clip(href, 80));
     }
-    if (el.disabled || el.getAttribute("aria-disabled") === "true") extra.push("(disabled)");
+    if (el.disabled || (ctl && ctl.disabled) || el.getAttribute("aria-disabled") === "true") extra.push("(disabled)");
     return kind + ' "' + label + '"' + (extra.length ? " " + extra.join(" ") : "");
   }
 
@@ -2630,6 +2711,16 @@ button.send.stop{background:var(--text);color:#faf9f5}
     refMap = new Map();
     nextRef = 1;
     const cands = [];
+    // Labels listed as stand-ins for a hidden radio or checkbox. Their text spans must not be listed again.
+    const listedLabels = new Set();
+    // Generic cursor:pointer targets listed by isPointerTarget, capped per call. Their text is not repeated.
+    const listedPointers = new Set();
+    const POINTER_CAP = 80;
+    let pointerCount = 0;
+    const pointerOwned = (el) => {
+      for (let p = el.parentElement; p; p = p.parentElement) if (listedPointers.has(p)) return true;
+      return false;
+    };
     const add = (c) => {
       c.idx = cands.length;
       cands.push(c);
@@ -2648,10 +2739,33 @@ button.send.stop{background:var(--text);color:#faf9f5}
         add({ ref, line: ind(depth) + "[" + ref + "] " + describe(el), prio: prioOf(el) });
         return;
       }
+      // A visible <label> whose radio/checkbox is not listed on its own (visually hidden, zero-size, or
+      // visibility hidden): the label is the thing a person clicks, so list it in the control's place.
+      if (tag === "LABEL") {
+        const ctl = labelControl(el);
+        if (ctl && controlUnlisted(ctl)) {
+          const ref = "ref_" + nextRef++;
+          refMap.set(ref, el);
+          listedLabels.add(el);
+          add({ ref, line: ind(depth) + "[" + ref + "] " + describe(el), prio: prioOf(el) });
+          return;
+        }
+      }
+      if (pointerCount < POINTER_CAP && isPointerTarget(el, tag)) {
+        const ref = "ref_" + nextRef++;
+        refMap.set(ref, el);
+        listedPointers.add(el);
+        pointerCount++;
+        add({ ref, line: ind(depth) + "[" + ref + '] clickable "' + accName(el) + '"', prio: prioOf(el) });
+        return;
+      }
+      const owningLabel = el.closest ? el.closest("label") : null;
       if (
         mode === "all" &&
         el.matches(TEXT_SEL) &&
         !el.closest(INTERACTIVE_SEL) &&
+        !(owningLabel && listedLabels.has(owningLabel)) &&
+        !pointerOwned(el) &&
         !el.querySelector(LEAF_BLOCKERS)
       ) {
         const t = clip(clean(el.textContent), 200);
@@ -2736,14 +2850,77 @@ button.send.stop{background:var(--text);color:#faf9f5}
 
   // ---------- click ----------
 
-  const isRisky = (el, name) => RISKY.test(name.toLowerCase()) || (!!el.form && el.type === "submit");
+  // Opening a composer is not outward-facing; sending/publishing from it still needs approval.
+  const OPENS_COMPOSER = /^(start a post|write a post|write a message|new message|compose)$/;
+  const isRisky = (el, name) => {
+    const n = String(name || "").toLowerCase().trim();
+    return (RISKY.test(n) && !OPENS_COMPOSER.test(n)) || (!!el.form && el.type === "submit");
+  };
+
+  // Wait until the DOM has been quiet 300 ms (min 500 ms, max 2500 ms total). Never throws.
+  // Resolves to true when at least one mutation was seen.
+  function waitForSettle() {
+    return new Promise((resolve) => {
+      let seen = false;
+      let mo = null;
+      let quiet = null;
+      let hard = null;
+      let minDone = false;
+      let last = Date.now();
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        try {
+          if (mo) mo.disconnect();
+        } catch {
+          // ignore
+        }
+        clearTimeout(quiet);
+        clearTimeout(hard);
+        resolve(seen);
+      };
+      const arm = () => {
+        clearTimeout(quiet);
+        quiet = setTimeout(() => {
+          if (minDone) finish();
+        }, 300);
+      };
+      try {
+        mo = new MutationObserver((recs) => {
+          // Our own overlay hosts coming and going are not page changes.
+          const own = (n) => !!n && typeof n.id === "string" && n.id.startsWith("claude-safari-");
+          const page = recs.some((r) => {
+            if (own(r.target)) return false;
+            if (r.type !== "childList") return true;
+            const ch = [...r.addedNodes, ...r.removedNodes];
+            return ch.length === 0 || !ch.every(own);
+          });
+          if (!page) return;
+          seen = true;
+          last = Date.now();
+          arm();
+        });
+        mo.observe(document, { childList: true, subtree: true, attributes: true });
+      } catch {
+        mo = null;
+      }
+      setTimeout(() => {
+        minDone = true;
+        // quiet for 300 ms already: done; otherwise the pending quiet timer finishes it
+        if (Date.now() - last >= 300) finish();
+      }, 500);
+      arm();
+      hard = setTimeout(finish, 2500);
+    });
+  }
 
   async function performClick(el, refLabel, name) {
     await scrollIntoMiddle(el);
     if (!el.isConnected) return { error: STALE_MSG };
     await pointerTo(el);
     if (isRisky(el, name)) {
-      const g = await requestApproval("Claude wants to click “" + (name || "this element") + "”");
+      const g = await requestApproval("Claude wants to click \u201c" + (name || "this element") + "\u201d");
       if (g !== "ok") {
         pointerIdleSoon();
         return { error: approvalError(g) };
@@ -2755,8 +2932,8 @@ button.send.stop{background:var(--text);color:#faf9f5}
     }
     flashOutline(el);
     pointerPress(el);
-    // A link that asks for a new tab: el.click() from a content script has no user activation, so the popup is
-    // blocked and nothing happens. Open it in this tab instead.
+    // A link that asks for a new tab: a synthetic click from a content script has no user activation, so the popup
+    // is blocked and nothing happens. Open it in this tab instead.
     const a = el.closest && el.closest("a[href]");
     if (a) {
       let newTab = false;
@@ -2773,23 +2950,71 @@ button.send.stop{background:var(--text);color:#faf9f5}
         return {
           text:
             "Opened " +
-            (name ? "“" + name + "”" : "the link") +
+            (name ? "\u201c" + name + "\u201d" : "the link") +
             " in this tab (the link asked for a new tab, which Safari blocks for extensions).",
         };
       }
     }
+    // Dispatch on the element actually under the pointer (SPA rows hang handlers on inner nodes), with the full
+    // hover/press sequence and a single click with detail 1 (React treats detail 0 as a keyboard/virtual click).
     const rect = el.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
-    const init = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0, buttons: 1 };
-    el.dispatchEvent(new PointerEvent("pointerdown", { ...init, pointerId: 1, pointerType: "mouse" }));
-    el.dispatchEvent(new MouseEvent("mousedown", init));
-    el.dispatchEvent(new PointerEvent("pointerup", { ...init, pointerId: 1, pointerType: "mouse", buttons: 0 }));
-    el.dispatchEvent(new MouseEvent("mouseup", { ...init, buttons: 0 }));
-    el.click();
-    await sleep(500);
+    // A label standing in for a radio or checkbox is clicked on the label itself so that its native activation
+    // toggles the control. Anything else keeps the element-under-pointer rule.
+    const ctl = el.tagName === "LABEL" ? labelControl(el) : null;
+    let target = el;
+    if (!ctl) {
+      try {
+        const t = document.elementFromPoint(x, y);
+        if (t && el.contains(t)) target = t;
+      } catch {
+        // keep el
+      }
+    }
+    const wasChecked = ctl ? ctl.checked : false;
+    const urlBefore = location.href;
+    // Observe from before the first event so DOM changes made by any handler count.
+    const settled = waitForSettle();
+    const base = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0, buttons: 0 };
+    const ptr = { pointerId: 1, pointerType: "mouse", isPrimary: true };
+    target.dispatchEvent(new PointerEvent("pointerover", { ...base, ...ptr }));
+    target.dispatchEvent(new MouseEvent("mouseover", base));
+    target.dispatchEvent(new PointerEvent("pointermove", { ...base, ...ptr }));
+    target.dispatchEvent(new MouseEvent("mousemove", base));
+    target.dispatchEvent(new PointerEvent("pointerdown", { ...base, ...ptr, buttons: 1 }));
+    target.dispatchEvent(new MouseEvent("mousedown", { ...base, buttons: 1 }));
+    try {
+      const f = target.closest && target.closest("a[href],button,input,select,textarea,summary,[tabindex],[contenteditable]");
+      if (f && f.focus) f.focus({ preventScroll: true });
+    } catch {
+      // focus is best-effort
+    }
+    target.dispatchEvent(new PointerEvent("pointerup", { ...base, ...ptr }));
+    target.dispatchEvent(new MouseEvent("mouseup", base));
+    target.dispatchEvent(new MouseEvent("click", { ...base, detail: 1 }));
+    // If the label's activation did not reach the control, click the control directly (once: only when unchanged).
+    if (ctl && ctl.checked === wasChecked) {
+      try {
+        ctl.click();
+      } catch {
+        // best-effort
+      }
+    }
+    const nowChecked = ctl ? ctl.checked : null;
+    let changed = false;
+    try {
+      changed = await settled;
+    } catch {
+      // never throw
+    }
     pointerIdleSoon();
-    return { text: "Clicked " + refLabel };
+    let text = "Clicked " + refLabel + (ctl ? " (now " + (nowChecked ? "checked" : "unchecked") + ")" : "");
+    if (location.href !== urlBefore) text += ". Page URL is now " + location.href;
+    if (!changed) {
+      text += ". Nothing visibly changed yet \u2014 the page may still be loading; call wait(2) and read_page before clicking again.";
+    }
+    return { text };
   }
 
   async function clickTool(input) {
@@ -2998,17 +3223,103 @@ button.send.stop{background:var(--text);color:#faf9f5}
   const position = () =>
     "scrollY=" + Math.round(window.scrollY) + " scrollHeight=" + document.documentElement.scrollHeight;
 
-  function scrollBestInnerAt(delta) {
-    const els = document.elementsFromPoint(window.innerWidth / 2, window.innerHeight / 2) || [];
-    let best = null;
-    for (const el of els) {
-      if (el === host || el === document.documentElement || el === document.body) continue;
-      const cs = window.getComputedStyle(el);
-      if (!/(auto|scroll)/.test(cs.overflowY)) continue;
-      if (el.scrollHeight <= el.clientHeight + 10) continue;
-      if (!best || el.clientHeight > best.clientHeight) best = el;
+  // SCROLL-CORE-START (self-contained: takes document-like and window-like objects, tested in bridge/test/scroll-tool.test.mjs)
+  // Pick what to scroll for dir (up, down, top, bottom): the page, then document.body, then the best inner pane.
+  // Returns { kind: "page"|"body"|"inner", el, height } or null when nothing can move that way.
+  function findScrollTarget(doc, win, dir, isOwn) {
+    const down = dir === "down" || dir === "bottom";
+    const vw = win.innerWidth;
+    const vh = win.innerHeight;
+    const canMove = (el, height) => {
+      const max = el.scrollHeight - height;
+      return down ? el.scrollTop < max - 1 : el.scrollTop > 0;
+    };
+    const se = doc.scrollingElement || doc.documentElement;
+    const pageLocked = win.getComputedStyle(doc.documentElement).overflowY === "hidden";
+    if (!pageLocked && canMove(se, vh)) return { kind: "page", el: se, height: vh };
+    const body = doc.body;
+    if (body && body !== se && /(auto|scroll|overlay)/.test(win.getComputedStyle(body).overflowY) &&
+        body.scrollHeight > body.clientHeight + 10 && canMove(body, body.clientHeight)) {
+      return { kind: "body", el: body, height: body.clientHeight };
     }
-    if (best) best.scrollBy({ top: delta });
+    // Inner panes: elements at a few points (piercing open shadow roots), plus a bounded scan of every element.
+    const cx = vw / 2;
+    const cy = vh / 2;
+    const seen = new Set();
+    const centreStack = new Set();
+    const addStack = (root, x, y, isCentre, depth) => {
+      if (depth > 5 || typeof root.elementsFromPoint !== "function") return;
+      for (const el of root.elementsFromPoint(x, y) || []) {
+        seen.add(el);
+        if (isCentre) centreStack.add(el);
+        if (el.shadowRoot) addStack(el.shadowRoot, x, y, isCentre, depth + 1);
+      }
+    };
+    for (const fx of [0.5, 0.25, 0.75]) addStack(doc, vw * fx, cy, fx === 0.5, 0);
+    const roots = [doc];
+    let scanned = 0;
+    for (let i = 0; i < roots.length && scanned < 2000; i++) {
+      for (const el of roots[i].querySelectorAll("*")) {
+        if (++scanned > 2000) break;
+        seen.add(el);
+        if (el.shadowRoot) roots.push(el.shadowRoot);
+      }
+    }
+    let best = null;
+    let bestUnder = false;
+    let bestArea = 0;
+    for (const el of seen) {
+      if (el === doc.body || el === doc.documentElement || isOwn(el)) continue;
+      if (!/(auto|scroll|overlay)/.test(win.getComputedStyle(el).overflowY)) continue;
+      if (el.scrollHeight <= el.clientHeight + 10 || el.clientHeight < 150) continue;
+      if (!canMove(el, el.clientHeight)) continue;
+      const r = el.getBoundingClientRect();
+      const w = Math.min(r.right, vw) - Math.max(r.left, 0);
+      const h = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+      if (w <= 0 || h <= 0) continue;
+      const under = centreStack.has(el) || (r.left <= cx && cx <= r.right && r.top <= cy && cy <= r.bottom);
+      const area = w * h;
+      if (!best || (under && !bestUnder) || (under === bestUnder && area > bestArea)) {
+        best = el;
+        bestUnder = under;
+        bestArea = area;
+      }
+    }
+    return best ? { kind: "inner", el: best, height: best.clientHeight } : null;
+  }
+
+  // Scroll the page (up, down, top, bottom) and report honestly whether anything moved.
+  async function scrollPage(doc, win, dir, isOwn, sleep) {
+    const t = findScrollTarget(doc, win, dir, isOwn);
+    const pos = () =>
+      (t ? t.kind + " scrollTop=" + Math.round(t.el.scrollTop) + " scrollHeight=" + t.el.scrollHeight + "; " : "") +
+      "window.scrollY=" + Math.round(win.scrollY) + " page scrollHeight=" + doc.documentElement.scrollHeight;
+    const failed = () => ({
+      error: "Could not scroll " + dir + ": nothing moved (tried: window, body, inner). " + pos(),
+    });
+    if (!t) return failed();
+    const before = t.el.scrollTop;
+    const max = Math.max(0, t.el.scrollHeight - t.height);
+    const step = Math.round(t.height * 0.8);
+    const want = dir === "top" ? 0 : dir === "bottom" ? max : dir === "down" ? before + step : before - step;
+    const to = Math.max(0, Math.min(max, want));
+    const scroller = t.kind === "page" ? win : t.el;
+    try {
+      scroller.scrollTo({ top: to, behavior: "instant" });
+    } catch (e) {
+      t.el.scrollTop = to;
+    }
+    await sleep(300);
+    if (Math.abs(t.el.scrollTop - before) < 1) return failed();
+    return { text: "Scrolled " + dir + " (" + (t.kind === "inner" ? "inner pane" : t.kind) + "). " + pos() };
+  }
+  // SCROLL-CORE-END
+
+  function isOwnUi(el) {
+    for (let n = el; n; n = n.parentNode || n.host) {
+      if (n === host || (typeof n.id === "string" && n.id.startsWith("claude-safari-"))) return true;
+    }
+    return false;
   }
 
   async function scrollTool(input) {
@@ -3022,21 +3333,10 @@ button.send.stop{background:var(--text);color:#faf9f5}
       return { text: "Scrolled [" + r.id + "] into view. " + position() };
     }
     const dir = input.direction;
-    const step = Math.round(window.innerHeight * 0.8);
-    if (dir === "top") {
-      window.scrollTo({ top: 0 });
-    } else if (dir === "bottom") {
-      window.scrollTo({ top: document.documentElement.scrollHeight });
-    } else if (dir === "up" || dir === "down") {
-      const delta = dir === "down" ? step : -step;
-      const before = window.scrollY;
-      window.scrollBy({ top: delta });
-      if (window.scrollY === before) scrollBestInnerAt(delta);
-    } else {
+    if (dir !== "up" && dir !== "down" && dir !== "top" && dir !== "bottom") {
       return { error: "Give a direction (up, down, top, bottom) or a ref." };
     }
-    await sleep(300);
-    return { text: "Scrolled " + dir + ". " + position() };
+    return scrollPage(document, window, dir, isOwnUi, sleep);
   }
 
   // ---------- get_page_text ----------
@@ -3100,6 +3400,13 @@ button.send.stop{background:var(--text);color:#faf9f5}
   function handleBackground(msg, sendResponse) {
     if (!msg || typeof msg !== "object") return;
     if (WINDOW_MODE && PAGE_ONLY.has(msg.type)) return;
+    // Liveness check from the background: an orphaned script never gets here, so no reply means dead.
+    if (msg.type === "ping") {
+      try {
+        sendResponse({ pong: true });
+      } catch {}
+      return true;
+    }
     if (msg.type === "toggle") {
       if (panelMode) toggle(); // terminal mode never shows the panel
       return;
@@ -3359,24 +3666,29 @@ button.send.stop{background:var(--text);color:#faf9f5}
     await sleep(reduceMotion() ? 50 : 200);
   }
   // ---------- visible pointer (PLAN T14) ----------
-  // A drawn arrow in its own closed-shadow host, one per document. It moves only for exec actions. No tool awaits
+  // A drawn round badge (no arrow) in its own closed-shadow host, one per document. It moves only for exec actions. No tool awaits
   // an animation; pointer code dispatches no mouse or pointer events and never touches the real cursor.
   const POINTER_HOST_ID = "claude-safari-pointer" + ID_SUFFIX;
   const POINTER_SVG_NS = "http://www.w3.org/2000/svg";
-  const POINTER_TIP = { x: 2 * (28 / 30), y: 2 * (31 / 32) }; // the arrow tip inside its 28x31 px box
+  const POINTER_TIP = { x: 15, y: 15 }; // the badge centre inside its 30x30 px box
+  const POINTER_IS_PANEL = BUILD_VARIANT === "panel";
+  const POINTER_RING = POINTER_IS_PANEL ? "#1F1E1D" : "#D97757"; // press ring colour
   const POINTER_HOST_CSS = [
     ["all", "initial"], ["position", "fixed"], ["top", "0"], ["left", "0"], ["width", "100%"], ["height", "100%"],
     ["z-index", "2147483646"], ["pointer-events", "none"], ["display", "block"], ["visibility", "visible"], ["overflow", "hidden"],
   ];
   const POINTER_CSS = `
-.w{position:fixed;left:0;top:0;width:28px;height:31px;pointer-events:none;will-change:transform;transform:translate(-100px,-100px);filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
-.w svg{display:block;width:28px;height:31px}
-.r{position:fixed;left:0;top:0;width:28px;height:28px;box-sizing:border-box;border:2px solid #D97757;border-radius:50%;pointer-events:none}
+.w{position:fixed;left:0;top:0;width:30px;height:30px;pointer-events:none;will-change:transform;transform:translate(-100px,-100px);filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
+.w svg{display:block;width:30px;height:30px;overflow:visible}
+.l{position:absolute;left:38px;top:5px;box-sizing:border-box;height:20px;padding:0 8px;border-radius:999px;white-space:nowrap;pointer-events:none;font:600 11px/18px -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;${POINTER_IS_PANEL ? "background:#F0EEE6;color:#1F1E1D;border:1px solid #D97757" : "background:#1F1E1D;color:#ffffff;border:0"}}
+.l.f{left:auto;right:38px}
+.r{position:fixed;left:0;top:0;width:36px;height:36px;box-sizing:border-box;border:2px solid ${POINTER_RING};border-radius:50%;pointer-events:none}
 `;
   let pointerBlocked = false;
   let pointerHost = null;
   let pointerShadow = null;
   let pointerWrap = null;
+  let pointerLabel = null; // the name pill inside .w; .f flips it to the left of the badge
   let pointerLast = null; // {x, y}: where the tip was last put
   let pointerGlide = null;
   let pointerFade = null;
@@ -3401,16 +3713,39 @@ button.send.stop{background:var(--text);color:#faf9f5}
     style.textContent = POINTER_CSS;
     pointerWrap = make("div", "w");
     const svg = document.createElementNS(POINTER_SVG_NS, "svg");
-    svg.setAttribute("viewBox", "0 0 30 32");
-    svg.setAttribute("preserveAspectRatio", "none");
-    const path = document.createElementNS(POINTER_SVG_NS, "path");
-    path.setAttribute("d", "M2 2 L2 26 L8.5 20 L13 30 L17 28 L12.5 18.5 L21 18.5 Z");
-    path.setAttribute("fill", "#D97757");
-    path.setAttribute("stroke", "#ffffff");
-    path.setAttribute("stroke-width", "1.5");
-    path.setAttribute("stroke-linejoin", "round");
-    svg.appendChild(path);
+    svg.setAttribute("viewBox", "0 0 30 30");
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    const svgEl = (name, attrs) => {
+      const n = document.createElementNS(POINTER_SVG_NS, name);
+      for (const [k, v] of attrs) n.setAttribute(k, v);
+      return n;
+    };
+    if (POINTER_IS_PANEL) {
+      // cream rounded square turned 45 degrees, clay border, dark upright sparkle
+      svg.appendChild(svgEl("rect", [
+        ["x", "6"], ["y", "6"], ["width", "18"], ["height", "18"], ["rx", "3"],
+        ["fill", "#F0EEE6"], ["stroke", "#D97757"], ["stroke-width", "2"], ["transform", "rotate(45 15 15)"],
+      ]));
+      svg.appendChild(svgEl("path", [
+        ["d", "M15 8 Q16 14 22 15 Q16 16 15 22 Q14 16 8 15 Q14 14 15 8Z"], ["fill", "#1F1E1D"],
+      ]));
+    } else {
+      // clay circle with a white border and a white 8-ray spark
+      svg.appendChild(svgEl("circle", [
+        ["cx", "15"], ["cy", "15"], ["r", "14"], ["fill", "#D97757"], ["stroke", "#ffffff"], ["stroke-width", "2"],
+      ]));
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI) / 4;
+        svg.appendChild(svgEl("line", [
+          ["x1", (15 + 4 * Math.cos(a)).toFixed(2)], ["y1", (15 + 4 * Math.sin(a)).toFixed(2)],
+          ["x2", (15 + 9 * Math.cos(a)).toFixed(2)], ["y2", (15 + 9 * Math.sin(a)).toFixed(2)],
+          ["stroke", "#ffffff"], ["stroke-width", "2.2"], ["stroke-linecap", "round"],
+        ]));
+      }
+    }
     pointerWrap.appendChild(svg);
+    pointerLabel = make("div", "l", POINTER_IS_PANEL ? "Claude" : "Claude Code");
+    pointerWrap.appendChild(pointerLabel);
     pointerShadow.append(style, pointerWrap);
     (document.documentElement || document.body).appendChild(pointerHost);
     popoverOpen(pointerHost);
@@ -3449,6 +3784,7 @@ button.send.stop{background:var(--text);color:#faf9f5}
       pointerLast = to;
       const at = (p) => "translate(" + (p.x - POINTER_TIP.x) + "px, " + (p.y - POINTER_TIP.y) + "px)";
       pointerWrap.style.transform = at(to);
+      if (pointerLabel) pointerLabel.classList.toggle("f", to.x > window.innerWidth - 130);
       if (document.hidden) return; // placed; no animation and no wait while hidden
       if (fresh) {
         pointerFade = pointerWrap.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120 });
@@ -3476,8 +3812,8 @@ button.send.stop{background:var(--text);color:#faf9f5}
       const r = el.getBoundingClientRect();
       if (!r.width && !r.height) return;
       const ring = make("div", "r");
-      ring.style.setProperty("left", r.left + r.width / 2 - 14 + "px");
-      ring.style.setProperty("top", r.top + r.height / 2 - 14 + "px");
+      ring.style.setProperty("left", r.left + r.width / 2 - 18 + "px");
+      ring.style.setProperty("top", r.top + r.height / 2 - 18 + "px");
       pointerShadow.appendChild(ring);
       ring.animate([{ transform: "scale(0)", opacity: 1 }, { transform: "scale(1)", opacity: 0 }], {
         duration: 400,
